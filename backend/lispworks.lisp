@@ -1,5 +1,5 @@
-;;;; $Id: lispworks.lisp 687 2012-02-27 14:49:55Z ctian $
-;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.5/backend/lispworks.lisp $
+;;;; $Id: lispworks.lisp 707 2012-12-26 15:25:06Z ctian $
+;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.6.0/backend/lispworks.lisp $
 
 ;;;; See LICENSE for licensing information.
 
@@ -155,7 +155,7 @@
         seconds)))
 
 #-win32
-(defmethod get-socket-receive-timeout (socket-fd)
+(defun get-socket-receive-timeout (socket-fd)
   "Get socket option: RCVTIMEO, return value is a float number"
   (declare (type integer socket-fd))
   (fli:with-dynamic-foreign-objects ((timeout (:struct timeval))
@@ -170,7 +170,7 @@
       (float (+ tv-sec (/ tv-usec 1000000))))))
 
 #+win32
-(defmethod get-socket-receive-timeout (socket-fd)
+(defun get-socket-receive-timeout (socket-fd)
   "Get socket option: RCVTIMEO, return value is a float number"
   (declare (type integer socket-fd))
   (fli:with-dynamic-foreign-objects ((timeout :int)
@@ -313,29 +313,29 @@
   (ecase protocol
     (:stream
      (let ((hostname (host-to-hostname host))
-	   (stream))
+           (stream))
        (setf stream
-	     (with-mapped-conditions ()
-	       (comm:open-tcp-stream hostname port
-				     :element-type element-type
-				     #-(and lispworks4 (not lispworks4.4)) ; >= 4.4.5
-				     #-(and lispworks4 (not lispworks4.4))
-				     :timeout timeout
-				     #-lispworks4 #-lispworks4
-				     #-lispworks4 #-lispworks4
-				     :local-address (when local-host (host-to-hostname local-host))
-				     :local-port local-port
-				     #-(or lispworks4 lispworks5.0) ; >= 5.1
-				     #-(or lispworks4 lispworks5.0)
-				     :nodelay nodelay)))
+             (with-mapped-conditions ()
+               (comm:open-tcp-stream hostname port
+                                     :element-type element-type
+                                     #-(and lispworks4 (not lispworks4.4)) ; >= 4.4.5
+                                     #-(and lispworks4 (not lispworks4.4))
+                                     :timeout timeout
+                                     #-lispworks4 #-lispworks4
+                                     #-lispworks4 #-lispworks4
+                                     :local-address (when local-host (host-to-hostname local-host))
+                                     :local-port local-port
+                                     #-(or lispworks4 lispworks5.0) ; >= 5.1
+                                     #-(or lispworks4 lispworks5.0)
+                                     :nodelay nodelay)))
        (if stream
-	   (make-stream-socket :socket (comm:socket-stream-socket stream)
-			       :stream stream)
+           (make-stream-socket :socket (comm:socket-stream-socket stream)
+                               :stream stream)
          ;; if no other error catched by above with-mapped-conditions and still fails, then it's a timeout
          (error 'timeout-error))))
     (:datagram
      (let ((usocket (make-datagram-socket
-		     (if (and host port)
+                     (if (and host port)
                          (with-mapped-conditions ()
                            (connect-to-udp-server (host-to-hostname host) port
                                                   :local-address (and local-host (host-to-hostname local-host))
@@ -345,8 +345,7 @@
                            (open-udp-socket       :local-address (and local-host (host-to-hostname local-host))
                                                   :local-port local-port
                                                   :read-timeout timeout)))
-		     :connected-p (and host port t))))
-       (hcl:flag-special-free-action usocket)
+                     :connected-p (and host port t))))
        usocket))))
 
 (defun socket-listen (host port
@@ -423,28 +422,27 @@
 (defvar *length-of-sockaddr_in*
   (fli:size-of '(:struct comm::sockaddr_in)))
 
-(defun send-message (socket-fd message buffer &optional (length (length buffer)) host service)
+(defmethod socket-send ((usocket datagram-usocket) buffer size &key host port (offset 0)
+                        &aux (socket-fd (socket usocket))
+                             (message (slot-value usocket 'send-buffer)))
   "Send message to a socket, using sendto()/send()"
   (declare (type integer socket-fd)
            (type sequence buffer))
+  (when host (setq host (host-to-hbo host)))
   (fli:with-dynamic-lisp-array-pointer (ptr message :type '(:unsigned :byte))
-    (replace message buffer :end2 length)
-    (if (and host service)
+    (replace message buffer :start2 offset :end2 (+ offset size))
+    (if (and host port)
         (fli:with-dynamic-foreign-objects ()
           (multiple-value-bind (error family client-addr client-addr-length)
-              (initialize-dynamic-sockaddr host service "udp")
+              (initialize-dynamic-sockaddr host port "udp")
+            (declare (ignore family))
             (when error
-              (error "cannot resolve hostname ~S, service ~S: ~A"
-                     host service error))
-            (%sendto socket-fd ptr (min length +max-datagram-packet-size+) 0
+              (error "cannot resolve hostname ~S, port ~S: ~A"
+                     host port error))
+            (%sendto socket-fd ptr (min size +max-datagram-packet-size+) 0
                      (fli:copy-pointer client-addr :type '(:struct comm::sockaddr))
                      client-addr-length)))
-      (comm::%send socket-fd ptr (min length +max-datagram-packet-size+) 0))))
-
-(defmethod socket-send ((socket datagram-usocket) buffer length &key host port)
-  (send-message (socket socket)
-                (slot-value socket 'send-buffer)
-                buffer length (and host (host-to-hbo host)) port))
+      (comm::%send socket-fd ptr (min size +max-datagram-packet-size+) 0))))
 
 (defun receive-message (socket-fd message &optional buffer (length (length buffer))
 			&key read-timeout (max-buffer-size +max-datagram-packet-size+))
@@ -766,7 +764,8 @@
   (defun free-wait-list (wl)
     (when (wait-list-p wl)
       (unless (null (wait-list-%wait wl))
-        (wsa-event-close (wait-list-%wait wl)))))
+        (wsa-event-close (wait-list-%wait wl))
+        (setf (wait-list-%wait wl) nil))))
   
   (eval-when (:load-toplevel :execute)
     (hcl:add-special-free-action 'free-wait-list))
@@ -790,3 +789,27 @@
      waiter))
   
 ) ; end of WIN32-block
+
+(defun set-socket-reuse-address (socket-fd reuse-address-p)
+  (declare (type integer socket-fd)
+           (type boolean reuse-address-p))
+  (fli:with-dynamic-foreign-objects ((value :int))
+    (setf (fli:dereference value) (if reuse-address-p 1 0))
+    (if (zerop (comm::setsockopt socket-fd
+                                 comm::*sockopt_sol_socket*
+                                 comm::*sockopt_so_reuseaddr*
+                                 (fli:copy-pointer value
+                                                   :type '(:pointer :void))
+                                 (fli:size-of :int)))
+        reuse-address-p)))
+
+(defun get-socket-reuse-address (socket-fd)
+  (declare (type integer socket-fd))
+  (fli:with-dynamic-foreign-objects ((value :int) (len :int))
+    (if (zerop (comm::getsockopt socket-fd
+                                 comm::*sockopt_sol_socket*
+                                 comm::*sockopt_so_reuseaddr*
+                                 (fli:copy-pointer value
+                                                   :type '(:pointer :void))
+                                 len))
+        (= 1 (fli:dereference value)))))

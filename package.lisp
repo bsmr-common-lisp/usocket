@@ -1,5 +1,5 @@
-;;;; $Id: package.lisp 672 2011-08-27 05:43:51Z ctian $
-;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.5/package.lisp $
+;;;; $Id: package.lisp 675 2011-10-01 14:49:26Z ctian $
+;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.6.0/package.lisp $
 
 ;;;; See the LICENSE file for licensing information.
 
@@ -27,6 +27,7 @@
              #:socket-send    ; udp function (send)
              #:socket-receive ; udp function (receive)
              #:socket-server  ; udp server
+             #:socket-option  ; 0.6.x
 
              #:wait-for-input ; waiting for input-ready state (select() like)
              #:make-wait-list

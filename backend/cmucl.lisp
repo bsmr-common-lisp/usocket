@@ -1,5 +1,5 @@
-;;;; $Id: cmucl.lisp 687 2012-02-27 14:49:55Z ctian $
-;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.5/backend/cmucl.lisp $
+;;;; $Id: cmucl.lisp 685 2012-02-04 15:56:00Z ctian $
+;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.6.0/backend/cmucl.lisp $
 
 ;;;; See LICENSE for licensing information.
 
@@ -174,14 +174,17 @@
    length
    flags))
 
-(defmethod socket-send ((usocket datagram-usocket) buffer length &key host port)
+(defmethod socket-send ((usocket datagram-usocket) buffer size &key host port (offset 0)
+			&aux (real-buffer (if (zerop offset)
+					      buffer
+					      (subseq buffer offset (+ offset size)))))
   (with-mapped-conditions (usocket)
     (if (and host port)
-        (ext:inet-sendto (socket usocket) buffer length (host-to-hbo host) port)
+	(ext:inet-sendto (socket usocket) real-buffer size (host-to-hbo host) port)
 	#-unicode
-	(unix:unix-send (socket usocket) buffer length 0)
+	(unix:unix-send (socket usocket) real-buffer size 0)
 	#+unicode
-	(%unix-send (socket usocket) buffer length 0))))
+	(%unix-send (socket usocket) real-buffer size 0))))
 
 (defmethod socket-receive ((usocket datagram-usocket) buffer length &key)
   (declare (values (simple-array (unsigned-byte 8) (*)) ; buffer
