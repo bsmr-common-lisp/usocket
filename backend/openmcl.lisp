@@ -1,5 +1,5 @@
-;;;; $Id: openmcl.lisp 574 2011-02-02 06:51:56Z ctian $
-;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.0/backend/openmcl.lisp $
+;;;; $Id: openmcl.lisp 634 2011-04-01 12:41:51Z ctian $
+;;;; $URL: svn+ssh://common-lisp.net/project/usocket/svn/usocket/tags/0.5.1/backend/openmcl.lisp $
 
 ;;;; See LICENSE for licensing information.
 
@@ -97,20 +97,22 @@
 					  :deadline deadline
 					  :nodelay nodelay
 					  :connect-timeout timeout)))
-	 (openmcl-socket:socket-connect mcl-sock)
 	 (make-stream-socket :stream mcl-sock :socket mcl-sock)))
       (:datagram
-       (let ((mcl-sock
-	      (openmcl-socket:make-socket :address-family :internet
-					  :type :datagram
-					  :local-host (when local-host (host-to-hostname local-host))
-					  :local-port local-port
-					  :format :binary)))
+       (let* ((mcl-sock
+               (openmcl-socket:make-socket :address-family :internet
+                                           :type :datagram
+                                           :local-host (when local-host (host-to-hostname local-host))
+                                           :local-port local-port
+					   :input-timeout timeout
+                                           :format :binary))
+              (usocket (make-datagram-socket mcl-sock)))
 	 (when (and host port)
 	   (ccl::inet-connect (ccl::socket-device mcl-sock)
 			      (ccl::host-as-inet-host host)
 			      (ccl::port-as-inet-port port "udp")))
-	 (make-datagram-socket mcl-sock))))))
+	 (setf (connected-p usocket) t)
+	 usocket)))))
 
 (defun socket-listen (host port
                            &key reuseaddress

@@ -1,5 +1,5 @@
-;;;; $Id: test-usocket.lisp 547 2010-07-16 08:23:10Z ctian $
-;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.0/test/test-usocket.lisp $
+;;;; $Id: test-usocket.lisp 616 2011-03-30 15:13:37Z ctian $
+;;;; $URL: svn+ssh://common-lisp.net/project/usocket/svn/usocket/tags/0.5.1/test/test-usocket.lisp $
 
 ;;;; See LICENSE for licensing information.
 
@@ -74,27 +74,13 @@
   nil)
 
 (deftest socket-failure.1
-  (with-caught-conditions (#-(or cmu lispworks armedbear openmcl mcl)
-                           usocket:network-unreachable-error
-                           #+(or cmu lispworks armedbear)
-                           usocket:unknown-error
-                           #+(or openmcl mcl)
-                           usocket:timeout-error
-                           nil)
+  (with-caught-conditions (usocket:timeout-error nil)
     (usocket:socket-connect 2130706432 +unused-local-port+ :timeout 1) ;; == #(127 0 0 0)
     :unreach)
   nil)
 
 (deftest socket-failure.2
-  (with-caught-conditions (#+(or lispworks armedbear)
-                           usocket:unknown-error
-                           #+cmu
-                           usocket:network-unreachable-error
-                           #+(or openmcl mcl)
-                           usocket:timeout-error
-                           #-(or lispworks armedbear cmu openmcl mcl)
-                           usocket:host-unreachable-error
-                           nil)
+  (with-caught-conditions (usocket:timeout-error nil)
     (usocket:socket-connect +non-existing-host+ 80 :timeout 1) ;; 80 = just a port
     :unreach)
   nil)
@@ -132,13 +118,11 @@
       (unwind-protect
           (progn
             (format (usocket:socket-stream sock)
-                    "GET / HTTP/1.0~c~c~c~c"
-                    #\Return #\linefeed #\Return #\linefeed)
+                    "GET / HTTP/1.0~2%")
             (force-output (usocket:socket-stream sock))
-            (read-line (usocket:socket-stream sock)))
+            (subseq (read-line (usocket:socket-stream sock)) 0 15))
         (usocket:socket-close sock))))
-  #+(or mcl clisp) "HTTP/1.1 200 OK"
-  #-(or mcl clisp) #.(format nil "HTTP/1.1 200 OK~A" #\Return) nil)
+  "HTTP/1.1 200 OK")
 
 (deftest socket-name.1
   (with-caught-conditions (nil nil)
@@ -202,14 +186,12 @@
       (unwind-protect
           (progn
             (format (usocket:socket-stream sock)
-                    "GET / HTTP/1.0~c~c~c~c"
-                    #\Return #\linefeed #\Return #\linefeed)
+                    "GET / HTTP/1.0~2%")
             (force-output (usocket:socket-stream sock))
             (usocket:wait-for-input sock :timeout *wait-for-input-timeout*)
-            (read-line (usocket:socket-stream sock)))
+            (subseq (read-line (usocket:socket-stream sock)) 0 15))
         (usocket:socket-close sock))))
-  #+(or mcl clisp) "HTTP/1.1 200 OK"
-  #-(or mcl clisp) #.(format nil "HTTP/1.1 200 OK~A" #\Return) nil)
+  "HTTP/1.1 200 OK")
 
 (defun run-usocket-tests ()
   (do-tests))

@@ -1,5 +1,5 @@
-;;;; $Id: scl.lisp 515 2010-01-07 18:26:06Z ctian $
-;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.0/backend/scl.lisp $
+;;;; $Id: scl.lisp 618 2011-03-31 03:22:37Z ctian $
+;;;; $URL: svn+ssh://common-lisp.net/project/usocket/svn/usocket/tags/0.5.1/backend/scl.lisp $
 
 ;;;; See LICENSE for licensing information.
 
@@ -82,7 +82,7 @@
 							     (host-to-hbo local-host)))))
 		     (with-mapped-conditions ()
 		       (ext:create-inet-socket protocol)))))
-       (let ((usocket (make-datagram-socket socket)))
+       (let ((usocket (make-datagram-socket socket :connected-p (and host port t))))
 	 (ext:finalize usocket #'(lambda ()
 				   (when (%open-p usocket)
 				     (ext:close-socket socket))))
@@ -145,6 +145,10 @@
 	  (scl-map-socket-error errno :socket socket)))))
 
 (defmethod socket-receive ((socket datagram-usocket) buffer length &key)
+  (declare (values (simple-array (unsigned-byte 8) (*)) ; buffer
+		   (integer 0)                          ; size
+		   (unsigned-byte 32)                   ; host
+		   (unsigned-byte 16)))                 ; port
   (let ((s (socket socket)))
     (let ((real-buffer (or buffer
 			   (make-array length :element-type '(unsigned-byte 8))))

@@ -1,5 +1,5 @@
-;;;; $Id: abcl.lisp 562 2010-09-15 06:26:32Z ctian $
-;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.0/backend/abcl.lisp $
+;;;; $Id: abcl.lisp 618 2011-03-31 03:22:37Z ctian $
+;;;; $URL: svn+ssh://common-lisp.net/project/usocket/svn/usocket/tags/0.5.1/backend/abcl.lisp $
 
 ;;;; New ABCL networking support (replacement to old armedbear.lisp)
 ;;;; Author: Chun Tian (binghe)
@@ -343,6 +343,10 @@
 ;;; TODO: return-host and return-port cannot be get ...
 (defmethod socket-receive ((usocket datagram-usocket) buffer length
 			   &key (element-type '(unsigned-byte 8)))
+  (declare (values (simple-array (unsigned-byte 8) (*)) ; buffer
+		   (integer 0)                          ; size
+		   (unsigned-byte 32)                   ; host
+		   (unsigned-byte 16)))                 ; port
   (let* ((socket (socket usocket))
 	 (real-length (or length +max-datagram-packet-size+))
 	 (byte-array (jnew-array $*byte real-length))

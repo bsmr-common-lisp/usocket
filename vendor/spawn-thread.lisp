@@ -1,5 +1,5 @@
-;;;; $Id: spawn-thread.lisp 561 2010-09-15 06:14:59Z ctian $
-;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.0/vendor/spawn-thread.lisp $
+;;;; $Id: spawn-thread.lisp 585 2011-03-20 14:13:27Z ctian $
+;;;; $URL: svn+ssh://common-lisp.net/project/usocket/svn/usocket/tags/0.5.1/vendor/spawn-thread.lisp $
 
 ;;;; SPWAN-THREAD from GBBopen's PortableThreads.lisp
 
@@ -43,6 +43,9 @@
 (defun spawn-thread (name function &rest args)
   #-(or (and cmu mp) cormanlisp (and sbcl sb-thread))
   (declare (dynamic-extent args))
+  #+abcl
+  (threads:make-thread #'(lambda () (apply function args))
+		       :name name)
   #+allegro
   (apply #'mp:process-run-function name function args)
   #+(and clisp mt)

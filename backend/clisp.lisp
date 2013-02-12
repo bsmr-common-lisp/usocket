@@ -1,13 +1,19 @@
-;;;; $Id: clisp.lisp 573 2011-01-05 23:16:16Z ctian $
-;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.0/backend/clisp.lisp $
+;;;; $Id: clisp.lisp 632 2011-04-01 11:54:02Z ctian $
+;;;; $URL: svn+ssh://common-lisp.net/project/usocket/svn/usocket/tags/0.5.1/backend/clisp.lisp $
 
 ;;;; See LICENSE for licensing information.
 
 (in-package :usocket)
 
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  #-ffi
+  (warn "This image doesn't contain FFI package, GET-HOST-NAME won't work.")
+  #-(or ffi rawsock)
+  (warn "This image doesn't contain either FFI or RAWSOCK package, no UDP support."))
+
 ;; utility routine for looking up the current host name
 #+ffi
-(FFI:DEF-CALL-OUT get-host-name-internal
+(ffi:def-call-out get-host-name-internal
          (:name "gethostname")
          (:arguments (name (FFI:C-PTR (FFI:C-ARRAY-MAX ffi:character 256))
                            :OUT :ALLOCA)
@@ -27,60 +33,117 @@
   #-ffi
   "localhost")
 
-#+win32
-(defun remap-maybe-for-win32 (z)
-  (mapcar #'(lambda (x)
-              (cons (mapcar #'(lambda (y)
-                                (+ 10000 y))
-                            (car x))
-                    (cdr x)))
-          z))
+(defun get-host-by-address (address)
+  (with-mapped-conditions ()
+    (let ((hostent (posix:resolve-host-ipaddr (host-to-hostname address))))
+      (posix:hostent-name hostent))))
 
+(defun get-hosts-by-name (name)
+  (with-mapped-conditions ()
+    (let ((hostent (posix:resolve-host-ipaddr name)))
+      (mapcar #'host-to-vector-quad
+              (posix:hostent-addr-list hostent)))))
+
+;; Format: ((UNIX Windows) . CONDITION)
 (defparameter +clisp-error-map+
-  #+win32
-  (append (remap-maybe-for-win32 +unix-errno-condition-map+)
-          (remap-maybe-for-win32 +unix-errno-error-map+))
   #-win32
-  (append +unix-errno-condition-map+
-          +unix-errno-error-map+))
+  `((:EADDRINUSE . address-in-use-error)
+    (:EADDRNOTAVAIL . address-not-available-error)
+    (:EBADF . bad-file-descriptor-error)
+    (:ECONNREFUSED  . connection-refused-error)
+    (:ECONNRESET . connection-reset-error)
+    (:ECONNABORTED . connection-aborted-error)
+    (:EINVAL . invalid-argument-error)
+    (:ENOBUFS . no-buffers-error)
+    (:ENOMEM . out-of-memory-error)
+    (:ENOTSUP . operation-not-supported-error)
+    (:EPERM . operation-not-permitted-error)
+    (:EPROTONOSUPPORT . protocol-not-supported-error)
+    (:ESOCKTNOSUPPORT . socket-type-not-supported-error)
+    (:ENETUNREACH . network-unreachable-error)
+    (:ENETDOWN . network-down-error)
+    (:ENETRESET . network-reset-error)
+    (:ESHUTDOWN . already-shutdown-error)
+    (:ETIMEDOUT . timeout-error)
+    (:EHOSTDOWN . host-down-error)
+    (:EHOSTUNREACH . host-unreachable-error))
+  #+win32
+  `((:WSAEADDRINUSE . address-in-use-error)
+    (:WSAEADDRNOTAVAIL . address-not-available-error)
+    (:WSAEBADF . bad-file-descriptor-error)
+    (:WSAECONNREFUSED  . connection-refused-error)
+    (:WSAECONNRESET . connection-reset-error)
+    (:WSAECONNABORTED . connection-aborted-error)
+    (:WSAEINVAL . invalid-argument-error)
+    (:WSAENOBUFS . no-buffers-error)
+    (:WSAENOMEM . out-of-memory-error)
+    (:WSAENOTSUP . operation-not-supported-error)
+    (:WSAEPERM . operation-not-permitted-error)
+    (:WSAEPROTONOSUPPORT . protocol-not-supported-error)
+    (:WSAESOCKTNOSUPPORT . socket-type-not-supported-error)
+    (:WSAENETUNREACH . network-unreachable-error)
+    (:WSAENETDOWN . network-down-error)
+    (:WSAENETRESET . network-reset-error)
+    (:WSAESHUTDOWN . already-shutdown-error)
+    (:WSAETIMEDOUT . timeout-error)
+    (:WSAEHOSTDOWN . host-down-error)
+    (:WSAEHOSTUNREACH . host-unreachable-error)))
 
 (defun handle-condition (condition &optional (socket nil))
   "Dispatch correct usocket condition."
-  (typecase condition
-    (system::simple-os-error
-       (let ((usock-err
-              (cdr (assoc (car (simple-condition-format-arguments condition))
-                          +clisp-error-map+ :test #'member))))
-         (when usock-err ;; don't claim the error if we don't know
-	   ;; it's actually a socket error ...
-             (if (subtypep usock-err 'error)
-                 (error usock-err :socket socket)
-               (signal usock-err :socket socket)))))))
+  (let (error-keyword error-string)
+    (typecase condition
+      (system::simple-os-error
+       (let ((errno (car (simple-condition-format-arguments condition))))
+	 (setq error-keyword (os:errno errno)
+	       error-string (os:strerror errno))))
+      (simple-error
+       (let ((keyword
+	      (car (simple-condition-format-arguments condition))))
+	 (setq error-keyword keyword
+	       error-string (os:strerror keyword))))
+      (error (error 'unknown-error :real-error condition))
+      (condition (signal 'unknown-condition :real-condition condition)))
+    (when error-keyword
+      (let ((usocket-error
+	     (cdr (assoc error-keyword +clisp-error-map+ :test #'eq))))
+	(if usocket-error
+	    (if (subtypep usocket-error 'error)
+		(error usocket-error :socket socket)
+		(signal usocket-error :socket socket))
+	    (error "Unknown OS error: ~A (~A)" error-string error-keyword))))))
 
 (defun socket-connect (host port &key (protocol :stream) (element-type 'character)
                        timeout deadline (nodelay t nodelay-specified)
                        local-host local-port)
-  (declare (ignore nodelay))
-  (when timeout (unsupported 'timeout 'socket-connect))
+  (declare (ignore nodelay)
+	   (ignorable timeout local-host local-port))
   (when deadline (unsupported 'deadline 'socket-connect))
   (when nodelay-specified (unsupported 'nodelay 'socket-connect))
-  (when local-host (unsupported 'local-host 'socket-connect))
-  (when local-port (unsupported 'local-port 'socket-connect))
-
-  (let ((socket)
-        (hostname (host-to-hostname host)))
-    (with-mapped-conditions (socket)
-      (setf socket
-            (if timeout
-                (socket:socket-connect port hostname
-                                       :element-type element-type
-                                       :buffered t
-                                       :timeout timeout)
-                (socket:socket-connect port hostname
-                                       :element-type element-type
-                                       :buffered t))))
-    (make-stream-socket :socket socket
-                        :stream socket))) ;; the socket is a stream too
+  (case protocol
+    (:stream
+     (let ((socket)
+	   (hostname (host-to-hostname host)))
+       (with-mapped-conditions (socket)
+	 (setf socket
+	       (if timeout
+		   (socket:socket-connect port hostname
+					  :element-type element-type
+					  :buffered t
+					  :timeout timeout)
+		   (socket:socket-connect port hostname
+					  :element-type element-type
+					  :buffered t))))
+       (make-stream-socket :socket socket
+			   :stream socket))) ;; the socket is a stream too
+    (:datagram
+     #+(or rawsock ffi)
+     (socket-create-datagram (or local-port *auto-port*)
+			     :local-host (or local-host *wildcard-host*)
+			     :remote-host (and host (host-to-vector-quad host))
+			     :remote-port port)
+     #-(or rawsock ffi)
+     (unsupported '(protocol :datagram) 'socket-connect))))
 
 (defun socket-listen (host port
                            &key reuseaddress
@@ -122,7 +185,7 @@
      (remove-waiter (wait-list usocket) usocket))
   (socket:socket-server-close (socket usocket)))
 
-(defmethod get-local-name ((usocket usocket))
+(defmethod get-local-name ((usocket stream-usocket))
   (multiple-value-bind
       (address port)
       (socket:socket-stream-local (socket usocket) t)
@@ -137,15 +200,14 @@
 (defmethod get-local-address ((usocket usocket))
   (nth-value 0 (get-local-name usocket)))
 
-(defmethod get-peer-address ((usocket stream-usocket))
+(defmethod get-peer-address ((usocket usocket))
   (nth-value 0 (get-peer-name usocket)))
 
 (defmethod get-local-port ((usocket usocket))
   (nth-value 1 (get-local-name usocket)))
 
-(defmethod get-peer-port ((usocket stream-usocket))
+(defmethod get-peer-port ((usocket usocket))
   (nth-value 1 (get-peer-name usocket)))
-
 
 (defun %setup-wait-list (wait-list)
   (declare (ignore wait-list)))
@@ -176,21 +238,19 @@
             (setf (state x) :READ)))
         wait-list))))
 
-
-;;
-;; UDP/Datagram sockets!
-;;
+;;;
+;;; UDP/Datagram sockets (RAWSOCK version)
+;;;
 
 #+rawsock
 (progn
-
   (defun make-sockaddr_in ()
     (make-array 16 :element-type '(unsigned-byte 8) :initial-element 0))
 
   (declaim (inline fill-sockaddr_in))
   (defun fill-sockaddr_in (sockaddr_in ip port)
-    (port-to-octet-buffer sockaddr_in port)
-    (ip-to-octet-buffer sockaddr_in ip :start 2)
+    (port-to-octet-buffer port sockaddr_in)
+    (ip-to-octet-buffer ip sockaddr_in :start 2)
     sockaddr_in)
 
   (defun socket-create-datagram (local-port
@@ -204,58 +264,421 @@
                         (fill-sockaddr_in (make-sockaddr_in)
                                           remote-host (or remote-port
                                                           local-port)))))
-      (bind sock lsock_addr)
+      (rawsock:bind sock (rawsock:make-sockaddr :inet lsock_addr))
       (when rsock_addr
-        (connect sock rsock_addr))
+        (rawsock:connect sock (rawsock:make-sockaddr :inet rsock_addr)))
       (make-datagram-socket sock :connected-p (if rsock_addr t nil))))
 
-  (defun socket-receive (socket buffer &key (size (length buffer)))
+  (defmethod socket-receive ((socket datagram-usocket) buffer length &key)
     "Returns the buffer, the number of octets copied into the buffer (received)
 and the address of the sender as values."
     (let* ((sock (socket socket))
-           (sockaddr (when (not (connected-p socket))
-                       (rawsock:make-sockaddr)))
-           (rv (if sockaddr
-                   (rawsock:recvfrom sock buffer sockaddr
-                                     :start 0
-                                     :end size)
-                   (rawsock:recv sock buffer
-                                 :start 0
-                                 :end size))))
-      (values buffer
-              rv
-              (list (ip-from-octet-buffer (sockaddr-data sockaddr) 4)
-                    (port-from-octet-buffer (sockaddr-data sockaddr) 2)))))
+           (sockaddr (rawsock:make-sockaddr :inet))
+           (real-length (or length +max-datagram-packet-size+))
+           (real-buffer (or buffer
+                            (make-array real-length
+                                        :element-type '(unsigned-byte 8)))))
+      (let ((rv (rawsock:recvfrom sock real-buffer sockaddr
+                                 :start 0 :end real-length))
+            (host 0) (port 0))
+        (unless (connected-p socket)
+          (let ((data (rawsock:sockaddr-data sockaddr)))
+            (setq host (ip-from-octet-buffer data :start 4)
+                  port (port-from-octet-buffer data :start 2))))
+        (values (if buffer real-buffer (subseq real-buffer 0 rv))
+                rv
+                host
+                port))))
 
-  (defun socket-send (socket buffer &key address (size (length buffer)))
+  (defmethod socket-send ((socket datagram-usocket) buffer length &key host port)
     "Returns the number of octets sent."
     (let* ((sock (socket socket))
-           (sockaddr (when address
-                       (rawsock:make-sockaddr :INET
+           (sockaddr (when (and host port)
+                       (rawsock:make-sockaddr :inet
                                               (fill-sockaddr_in
                                                (make-sockaddr_in)
-                                               (host-byte-order
-                                                (second address))
-                                               (first address)))))
-           (rv (if address
-                   (rawsock:sendto sock buffer sockaddr
+                                               (host-byte-order host)
+                                               port))))
+           (real-length (or length (length buffer)))
+           (real-buffer (if (typep buffer '(simple-array (unsigned-byte 8) (*)))
+                            buffer
+                          (make-array real-length
+                                      :element-type '(unsigned-byte 8)
+                                      :initial-contents (subseq buffer 0 real-length))))
+           (rv (if (and host port)
+                   (rawsock:sendto sock real-buffer sockaddr
                                    :start 0
-                                   :end size)
-                   (rawsock:send sock buffer
+                                   :end real-length)
+                   (rawsock:send sock real-buffer
                                  :start 0
-                                 :end size))))
+                                 :end real-length))))
       rv))
 
   (defmethod socket-close ((usocket datagram-usocket))
     (when (wait-list usocket)
        (remove-waiter (wait-list usocket) usocket))
     (rawsock:sock-close (socket usocket)))
-  
-  )
 
-#-rawsock
+  (declaim (inline get-socket-name))
+  (defun get-socket-name (socket function)
+    (let ((sockaddr (rawsock:make-sockaddr :inet (make-sockaddr_in))))
+      (funcall function socket sockaddr)
+      (let ((data (rawsock:sockaddr-data sockaddr)))
+        (values (hbo-to-vector-quad (ip-from-octet-buffer data :start 2))
+                (port-from-octet-buffer data :start 0)))))
+
+  (defmethod get-local-name ((usocket datagram-usocket))
+    (get-socket-name (socket usocket) 'rawsock:getsockname))
+
+  (defmethod get-peer-name ((usocket datagram-usocket))
+    (get-socket-name (socket usocket) 'rawsock:getpeername))
+
+) ; progn
+
+;;;
+;;; UDP/Datagram sockets (FFI version)
+;;;
+
+#+(and ffi (not rawsock))
 (progn
-  (warn "This image doesn't contain the RAWSOCK package.
-To enable UDP socket support, please be sure to use the -Kfull parameter
-at startup, or to enable RAWSOCK support during compilation.")
-  )
+  ;; C primitive types
+  (ffi:def-c-type socklen_t ffi:uint32)
+
+  ;; C structures
+  (ffi:def-c-struct sockaddr
+    #+macos (sa_len ffi:uint8)
+    (sa_family  #-macos ffi:ushort
+		#+macos ffi:uint8)
+    (sa_data    (ffi:c-array ffi:char 14)))
+
+  (ffi:def-c-struct sockaddr_in
+    #+macos (sin_len ffi:uint8)
+    (sin_family #-macos ffi:short
+		#+macos ffi:uint8)
+    (sin_port   #-macos ffi:ushort
+		#+macos ffi:uint16)
+    (sin_addr   ffi:uint32)
+    (sin_zero   (ffi:c-array ffi:char 8)))
+
+  (ffi:def-c-struct timeval
+    (tv_sec     ffi:long)
+    (tv_usec    ffi:long))
+
+  ;; foreign functions
+  (ffi:def-call-out %sendto (:name "sendto")
+    (:arguments (socket ffi:int)
+		(buffer ffi:c-pointer)
+		(length ffi:int)
+		(flags ffi:int)
+		(address (ffi:c-ptr sockaddr))
+		(address-len ffi:int))
+    #+win32 (:library "WS2_32")
+    #-win32 (:library :default)
+    (:language #-win32 :stdc
+	       #+win32 :stdc-stdcall)
+    (:return-type ffi:int))
+
+  (ffi:def-call-out %send (:name "send")
+    (:arguments (socket ffi:int)
+		(buffer ffi:c-pointer)
+		(length ffi:int)
+		(flags ffi:int))
+    #+win32 (:library "WS2_32")
+    #-win32 (:library :default)
+    (:language #-win32 :stdc
+	       #+win32 :stdc-stdcall)
+    (:return-type ffi:int))
+
+  (ffi:def-call-out %recvfrom (:name "recvfrom")
+    (:arguments (socket ffi:int)
+		(buffer ffi:c-pointer)
+		(length ffi:int)
+		(flags ffi:int)
+		(address (ffi:c-ptr sockaddr) :in-out)
+		(address-len (ffi:c-ptr ffi:int) :in-out))
+    #+win32 (:library "WS2_32")
+    #-win32 (:library :default)
+    (:language #-win32 :stdc
+	       #+win32 :stdc-stdcall)
+    (:return-type ffi:int))
+
+  (ffi:def-call-out %socket (:name "socket")
+    (:arguments (family ffi:int)
+		(type ffi:int)
+		(protocol ffi:int))
+    #+win32 (:library "WS2_32")
+    #-win32 (:library :default)
+    (:language #-win32 :stdc
+	       #+win32 :stdc-stdcall)
+    (:return-type ffi:int))
+
+  (ffi:def-call-out %connect (:name "connect")
+    (:arguments (socket ffi:int)
+		(address (ffi:c-ptr sockaddr) :in)
+		(address_len socklen_t))
+    #+win32 (:library "WS2_32")
+    #-win32 (:library :default)
+    (:language #-win32 :stdc
+	       #+win32 :stdc-stdcall)
+    (:return-type ffi:int))
+
+  (ffi:def-call-out %bind (:name "bind")
+    (:arguments (socket ffi:int)
+		(address (ffi:c-ptr sockaddr) :in)
+		(address_len socklen_t))
+    #+win32 (:library "WS2_32")
+    #-win32 (:library :default)
+    (:language #-win32 :stdc
+	       #+win32 :stdc-stdcall)
+    (:return-type ffi:int))
+
+  (ffi:def-call-out %close (:name #-win32 "close" #+win32 "closesocket")
+    (:arguments (socket ffi:int))
+    #+win32 (:library "WS2_32")
+    #-win32 (:library :default)
+    (:language #-win32 :stdc
+	       #+win32 :stdc-stdcall)
+    (:return-type ffi:int))
+
+  (ffi:def-call-out %getsockopt (:name "getsockopt")
+    (:arguments (sockfd ffi:int)
+		(level ffi:int)
+		(optname ffi:int)
+		(optval ffi:c-pointer)
+		(optlen (ffi:c-ptr socklen_t) :out))
+    #+win32 (:library "WS2_32")
+    #-win32 (:library :default)
+    (:language #-win32 :stdc
+	       #+win32 :stdc-stdcall)
+    (:return-type ffi:int))
+
+  (ffi:def-call-out %setsockopt (:name "setsockopt")
+    (:arguments (sockfd ffi:int)
+		(level ffi:int)
+		(optname ffi:int)
+		(optval ffi:c-pointer)
+		(optlen socklen_t))
+    #+win32 (:library "WS2_32")
+    #-win32 (:library :default)
+    (:language #-win32 :stdc
+	       #+win32 :stdc-stdcall)
+    (:return-type ffi:int))
+
+  (ffi:def-call-out %htonl (:name "htonl")
+    (:arguments (hostlong ffi:uint32))
+    #+win32 (:library "WS2_32")
+    #-win32 (:library :default)
+    (:language #-win32 :stdc
+	       #+win32 :stdc-stdcall)
+    (:return-type ffi:uint32))
+
+  (ffi:def-call-out %htons (:name "htons")
+    (:arguments (hostshort ffi:uint16))
+    #+win32 (:library "WS2_32")
+    #-win32 (:library :default)
+    (:language #-win32 :stdc
+	       #+win32 :stdc-stdcall)
+    (:return-type ffi:uint16))
+
+  (ffi:def-call-out %ntohl (:name "ntohl")
+    (:arguments (netlong ffi:uint32))
+    #+win32 (:library "WS2_32")
+    #-win32 (:library :default)
+    (:language #-win32 :stdc
+	       #+win32 :stdc-stdcall)
+    (:return-type ffi:uint32))
+
+  (ffi:def-call-out %ntohs (:name "ntohs")
+    (:arguments (netshort ffi:uint16))
+    #+win32 (:library "WS2_32")
+    #-win32 (:library :default)
+    (:language #-win32 :stdc
+	       #+win32 :stdc-stdcall)
+    (:return-type ffi:uint16))
+
+  (ffi:def-call-out %getsockname (:name "getsockname")
+    (:arguments (sockfd ffi:int)
+		(localaddr (ffi:c-ptr sockaddr) :in-out)
+		(addrlen (ffi:c-ptr socklen_t) :in-out))
+    #+win32 (:library "WS2_32")
+    #-win32 (:library :default)
+    (:language #-win32 :stdc
+	       #+win32 :stdc-stdcall)
+    (:return-type ffi:int))
+
+  (ffi:def-call-out %getpeername (:name "getpeername")
+    (:arguments (sockfd ffi:int)
+		(peeraddr (ffi:c-ptr sockaddr) :in-out)
+		(addrlen (ffi:c-ptr socklen_t) :in-out))
+    #+win32 (:library "WS2_32")
+    #-win32 (:library :default)
+    (:language #-win32 :stdc
+	       #+win32 :stdc-stdcall)
+    (:return-type ffi:int))
+
+  ;; socket constants
+  (defconstant +socket-af-inet+ 2)
+  (defconstant +socket-sock-dgram+ 2)
+  (defconstant +socket-ip-proto-udp+ 17)
+
+  (defconstant +sockopt-so-rcvtimeo+ #-linux #x1006 #+linux 20 "Socket receive timeout")
+
+  (defparameter *length-of-sockaddr_in* (ffi:sizeof 'sockaddr_in))
+
+  (declaim (inline fill-sockaddr_in))
+  (defun fill-sockaddr_in (sockaddr host port)
+    (let ((hbo (host-to-hbo host)))
+      (ffi:with-c-place (place sockaddr)
+	#+macos
+	(setf (ffi:slot place 'sin_len) *length-of-sockaddr_in*)
+	(setf (ffi:slot place 'sin_family) +socket-af-inet+
+	      (ffi:slot place 'sin_port) (%htons port)
+	      (ffi:slot place 'sin_addr) (%htonl hbo)))
+      sockaddr))
+
+  (defun socket-create-datagram (local-port
+				 &key (local-host *wildcard-host*)
+				      remote-host
+				      remote-port)
+    (let ((sock (%socket +socket-af-inet+ +socket-sock-dgram+ +socket-ip-proto-udp+))
+	  (lsock_addr (fill-sockaddr_in (ffi:allocate-shallow 'sockaddr_in)
+					local-host local-port))
+	  (rsock_addr (when remote-host
+			(fill-sockaddr_in (ffi:allocate-shallow 'sockaddr_in)
+					  remote-host (or remote-port local-port)))))
+      (unless (plusp sock)
+	(error "SOCKET-CREATE-DATAGRAM ERROR (socket): ~A" (os:errno)))
+      (unwind-protect
+	   (let ((rv (%bind sock (ffi:cast (ffi:foreign-value lsock_addr) 'sockaddr)
+			    *length-of-sockaddr_in*)))
+	     (unless (zerop rv)
+	       (error "SOCKET-CREATE-DATAGRAM ERROR (bind): ~A" (os:errno)))
+	     (when rsock_addr
+	       (let ((rv (%connect sock
+				   (ffi:cast (ffi:foreign-value rsock_addr) 'sockaddr)
+				   *length-of-sockaddr_in*)))
+		 (unless (zerop rv)
+		   (error "SOCKET-CREATE-DATAGRAM ERROR (connect): ~A" (os:errno))))))
+	(ffi:foreign-free lsock_addr)
+	(when remote-host
+	  (ffi:foreign-free rsock_addr)))
+      (make-datagram-socket sock :connected-p (if rsock_addr t nil))))
+
+  (defun finalize-datagram-usocket (object)
+    (when (datagram-usocket-p object)
+      (socket-close object)))
+
+  (defmethod initialize-instance :after ((usocket datagram-usocket) &key)
+    (setf (slot-value usocket 'recv-buffer)
+	  (ffi:allocate-shallow 'ffi:uint8 :count +max-datagram-packet-size+))
+    ;; finalize the object
+    (ext:finalize usocket 'finalize-datagram-usocket))
+
+  (defmethod socket-close ((usocket datagram-usocket))
+    (when (wait-list usocket)
+      (remove-waiter (wait-list usocket) usocket))
+    (with-slots (recv-buffer socket) usocket
+      (ffi:foreign-free recv-buffer)
+      (zerop (%close socket))))
+
+  (defmethod socket-receive ((usocket datagram-usocket) buffer length &key)
+    (let ((remote-address (ffi:allocate-shallow 'sockaddr_in))
+	  (remote-address-length (ffi:allocate-shallow 'ffi:int))
+	  nbytes (host 0) (port 0))
+      (setf (ffi:foreign-value remote-address-length)
+	    *length-of-sockaddr_in*)
+      (unwind-protect
+	   (multiple-value-bind (n address address-length)
+	       (%recvfrom (socket usocket)
+			  (ffi:foreign-address (slot-value usocket 'recv-buffer))
+			  +max-datagram-packet-size+
+			  0 ; flags
+			  (ffi:cast (ffi:foreign-value remote-address) 'sockaddr)
+			  (ffi:foreign-value remote-address-length))
+	     (when (minusp n)
+	       (error "SOCKET-RECEIVE ERROR: ~A" (os:errno)))
+	     (setq nbytes n)
+	     (when (= address-length *length-of-sockaddr_in*)
+	       (let ((data (sockaddr-sa_data address)))
+		 (setq host (ip-from-octet-buffer data :start 2)
+		       port (port-from-octet-buffer data))))
+	     (cond ((plusp n)
+		    (let ((return-buffer (ffi:foreign-value (slot-value usocket 'recv-buffer))))
+		      (if buffer ; replace exist buffer of create new return buffer
+			  (let ((end-1 (min (or length (length buffer)) +max-datagram-packet-size+))
+				(end-2 (min n +max-datagram-packet-size+)))
+			    (replace buffer return-buffer :end1 end-1 :end2 end-2))
+			  (setq buffer (subseq return-buffer 0 (min n +max-datagram-packet-size+))))))
+		   ((zerop n))))
+	(ffi:foreign-free remote-address)
+	(ffi:foreign-free remote-address-length))
+      (values buffer nbytes host port)))
+
+  ;; implementation note: different from socket-receive, we know how many bytes we want to send everytime,
+  ;; so, a send buffer will not needed, and if there is a buffer, it's hard to fill its content like those
+  ;; in LispWorks. So, we allocate new foreign buffer for holding data (unknown sequence subtype) every time.
+  ;; 
+  ;; I don't know if anyone is watching my coding work, but I think this design is reasonable for CLISP.
+  (defmethod socket-send ((usocket datagram-usocket) buffer length &key host port)
+    (declare (type sequence buffer)
+	     (type integer length))
+    (let ((remote-address (when (and host port)
+			    (fill-sockaddr_in (ffi:allocate-shallow 'sockaddr_in) host port)))
+	  (send-buffer (let ((buffer-length (length buffer)))
+			 (if (> buffer-length (* length 2))
+			     ;; if buffer is too big, then we copy out a subseq and only allocate as need
+			     (ffi:allocate-deep 'ffi:uint8 (subseq buffer 0 length) :count length :read-only t)
+			     ;; then we allocate the whole buffer directly, that should be faster.
+			     (ffi:allocate-deep 'ffi:uint8 buffer :count (length buffer) :read-only t))))
+	  (real-length (min length +max-datagram-packet-size+))
+	  (nbytes 0))
+      (unwind-protect
+	   (let ((n (if remote-address
+			(%sendto (socket usocket)
+				 (ffi:foreign-address send-buffer)
+				 real-length
+				 0 ; flags
+				 (ffi:cast (ffi:foreign-value remote-address) 'sockaddr)
+				 *length-of-sockaddr_in*)
+			(%send (socket usocket)
+			       (ffi:foreign-address send-buffer)
+			       real-length
+			       0))))
+	     (cond ((plusp n)
+		    (setq nbytes n))
+		   ((zerop n)
+		    (setq nbytes n))
+		   (t (error "SOCKET-SEND ERROR: ~A" (os:errno)))))
+	(ffi:foreign-free send-buffer)
+	(when remote-address
+	  (ffi:foreign-free remote-address))
+	nbytes)))
+
+  (declaim (inline get-socket-name))
+  (defun get-socket-name (socket function)
+    (let ((address (ffi:allocate-shallow 'sockaddr_in))
+	  (address-length (ffi:allocate-shallow 'ffi:int))
+	  (host 0) (port 0))
+      (setf (ffi:foreign-value address-length) *length-of-sockaddr_in*)
+      (unwind-protect
+	   (multiple-value-bind (rv return-address return-address-length)
+	       (funcall function socket
+			(ffi:cast (ffi:foreign-value address) 'sockaddr)
+			(ffi:foreign-value address-length))
+	     (declare (ignore return-address-length))
+	     (if (zerop rv)
+		 (let ((data (sockaddr-sa_data return-address)))
+		   (setq host (ip-from-octet-buffer data :start 2)
+			 port (port-from-octet-buffer data)))
+		 (error "GET-SOCKET-NAME ERROR: ~A" (os:errno))))
+	(ffi:foreign-free address)
+	(ffi:foreign-free address-length))
+      (values (hbo-to-vector-quad host) port)))
+
+  (defmethod get-local-name ((usocket datagram-usocket))
+    (get-socket-name (socket usocket) '%getsockname))
+
+  (defmethod get-peer-name ((usocket datagram-usocket))
+    (get-socket-name (socket usocket) '%getpeername))
+
+) ; progn

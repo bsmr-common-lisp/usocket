@@ -15,17 +15,18 @@
 (defsystem usocket-test
     :name "usocket test"
     :author "Erik Enge"
-    :version "0.1.0"
+    :maintainer "Chun Tian (binghe)"
+    :version "0.2.0"
     :licence "MIT"
     :description "Tests for usocket"
     :depends-on (:usocket
                  :rt)
     :components ((:module "test"
+		  :serial t
 		  :components ((:file "package")
-			       (:file "test-usocket"
-				      :depends-on ("package"))
-			       (:file "test-condition"
-				      :depends-on ("test-usocket"))))))
+			       (:file "test-usocket")
+			       (:file "test-condition")
+			       (:file "test-datagram")))))
 
 (defmethod perform ((op test-op) (c (eql (find-system :usocket-test))))
   (funcall (intern "DO-TESTS" "USOCKET-TEST")))

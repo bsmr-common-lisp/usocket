@@ -1,5 +1,5 @@
-;;;; $Id: allegro.lisp 515 2010-01-07 18:26:06Z ctian $
-;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.0/backend/allegro.lisp $
+;;;; $Id: allegro.lisp 618 2011-03-31 03:22:37Z ctian $
+;;;; $URL: svn+ssh://common-lisp.net/project/usocket/svn/usocket/tags/0.5.1/backend/allegro.lisp $
 
 ;;;; See LICENSE for licensing information.
 
@@ -90,7 +90,7 @@
       (:stream
        (make-stream-socket :socket socket :stream socket))
       (:datagram
-       (make-datagram-socket socket)))))
+       (make-datagram-socket socket :connected-p (and host port t))))))
 
 ;; One socket close method is sufficient,
 ;; because socket-streams are also sockets.
@@ -155,6 +155,10 @@
       (socket:send-to s buffer length :remote-host host :remote-port port))))
 
 (defmethod socket-receive ((socket datagram-usocket) buffer length &key)
+  (declare (values (simple-array (unsigned-byte 8) (*)) ; buffer
+		   (integer 0)                          ; size
+		   (unsigned-byte 32)                   ; host
+		   (unsigned-byte 16)))                 ; port
   (with-mapped-conditions (socket)
     (let ((s (socket socket)))
       (socket:receive-from s length :buffer buffer :extract t))))

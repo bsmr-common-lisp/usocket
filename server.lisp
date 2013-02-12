@@ -1,5 +1,5 @@
-;;;; $Id: server.lisp 562 2010-09-15 06:26:32Z ctian $
-;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.0/server.lisp $
+;;;; $Id: server.lisp 602 2011-03-29 13:31:40Z ctian $
+;;;; $URL: svn+ssh://common-lisp.net/project/usocket/svn/usocket/tags/0.5.1/server.lisp $
 
 (in-package :usocket)
 
@@ -31,8 +31,8 @@
                                   :timeout timeout
                                   :max-buffer-size max-buffer-size)))))
       (if in-new-thread
-          (spawn-thread "USOCKET Server" #'real-call)
-        (real-call)))))
+	  (values (spawn-thread "USOCKET Server" #'real-call) socket)
+	  (real-call)))))
 
 (defvar *remote-host*)
 (defvar *remote-port*)

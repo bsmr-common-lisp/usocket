@@ -1,5 +1,5 @@
-;;;; $Id: cmucl.lisp 564 2010-09-28 09:15:13Z ctian $
-;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.0/backend/cmucl.lisp $
+;;;; $Id: cmucl.lisp 625 2011-03-31 14:39:07Z ctian $
+;;;; $URL: svn+ssh://common-lisp.net/project/usocket/svn/usocket/tags/0.5.1/backend/cmucl.lisp $
 
 ;;;; See LICENSE for licensing information.
 
@@ -106,7 +106,7 @@
 		     (with-mapped-conditions (socket)
 		       (ext:create-inet-socket protocol)))))
        (if socket
-	   (let ((usocket (make-datagram-socket socket)))
+	   (let ((usocket (make-datagram-socket socket :connected-p (and host port t))))
 	     (ext:finalize usocket #'(lambda () (when (%open-p usocket)
 						  (ext:close-socket socket))))
 	     usocket)
@@ -159,11 +159,34 @@
 (defmethod socket-close :after ((socket datagram-usocket))
   (setf (%open-p socket) nil))
 
+#+unicode
+(defun %unix-send (fd buffer length flags)
+  (alien:alien-funcall
+   (alien:extern-alien "send"
+		       (function c-call:int
+				 c-call:int
+				 system:system-area-pointer
+				 c-call:int
+				 c-call:int))
+   fd
+   (system:vector-sap buffer)
+   length
+   flags))
+
 (defmethod socket-send ((usocket datagram-usocket) buffer length &key host port)
   (with-mapped-conditions (usocket)
-    (ext:inet-sendto (socket usocket) buffer length (if host (host-to-hbo host)) port)))
+    (if (and host port)
+        (ext:inet-sendto (socket usocket) buffer length (host-to-hbo host) port)
+	#-unicode
+	(unix:unix-send (socket usocket) buffer length 0)
+	#+unicode
+	(%unix-send (socket usocket) buffer length 0))))
 
 (defmethod socket-receive ((usocket datagram-usocket) buffer length &key)
+  (declare (values (simple-array (unsigned-byte 8) (*)) ; buffer
+		   (integer 0)                          ; size
+		   (unsigned-byte 32)                   ; host
+		   (unsigned-byte 16)))                 ; port
   (let ((real-buffer (or buffer
                          (make-array length :element-type '(unsigned-byte 8))))
         (real-length (or length
@@ -171,8 +194,7 @@
     (multiple-value-bind (nbytes remote-host remote-port)
         (with-mapped-conditions (usocket)
           (ext:inet-recvfrom (socket usocket) real-buffer real-length))
-      (when (plusp nbytes)
-        (values real-buffer nbytes remote-host remote-port)))))
+      (values real-buffer nbytes remote-host remote-port))))
 
 (defmethod get-local-name ((usocket usocket))
   (multiple-value-bind
@@ -250,17 +272,17 @@
        (multiple-value-bind
            (secs musecs)
            (split-timeout (or timeout 1))
-         (multiple-value-bind
-             (count err)
-             (unix:unix-fast-select (1+ (reduce #'max
-                                                (wait-list-%wait wait-list)))
-                                    (alien:addr rfds) nil nil
-                                    (when timeout secs) musecs)
+         (multiple-value-bind (count err)
+	     (unix:unix-fast-select (1+ (reduce #'max
+						(wait-list-%wait wait-list)))
+				    (alien:addr rfds) nil nil
+				    (when timeout secs) musecs)
+	   (declare (ignore err))
            (if (<= 0 count)
                ;; process the result...
                (dolist (x (wait-list-waiters wait-list))
                  (when (unix:fd-isset (socket x) rfds)
                    (setf (state x) :READ)))
-             (progn
-	       ;;###FIXME generate an error, except for EINTR
-               )))))))
+	       (progn
+		 ;;###FIXME generate an error, except for EINTR
+		 )))))))

@@ -1,5 +1,5 @@
-;;;; $Id: test-condition.lisp 554 2010-09-11 13:34:27Z ctian $
-;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.0/test/test-condition.lisp $
+;;;; $Id: test-condition.lisp 599 2011-03-29 13:04:27Z ctian $
+;;;; $URL: svn+ssh://common-lisp.net/project/usocket/svn/usocket/tags/0.5.1/test/test-condition.lisp $
 
 (in-package :usocket-test)
 
@@ -11,7 +11,7 @@
 
 (deftest timeout-error.1
   (with-caught-conditions (usocket:timeout-error nil)
-    (usocket:socket-connect "common-lisp.net" 81 :timeout 1)
+    (usocket:socket-connect "common-lisp.net" 81 :timeout 0)
     t)
   nil)
 

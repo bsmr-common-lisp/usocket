@@ -1,6 +1,6 @@
 ;;;; -*- Mode: Lisp -*-
-;;;; $Id: usocket.asd 555 2010-09-13 15:33:20Z ctian $
-;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.0/usocket.asd $
+;;;; $Id: usocket.asd 633 2011-04-01 12:06:23Z ctian $
+;;;; $URL: svn+ssh://common-lisp.net/project/usocket/svn/usocket/tags/0.5.1/usocket.asd $
 
 ;;;; See the LICENSE file for licensing information.
 
@@ -14,7 +14,8 @@
 (defsystem usocket
     :name "usocket"
     :author "Erik Enge & Erik Huelsmann"
-    :version "0.5.0"
+    :maintainer "Chun Tian (binghe)"
+    :version "0.5.1"
     :licence "MIT"
     :description "Universal socket library for Common Lisp"
     :depends-on (#+sbcl :sb-bsd-sockets)
