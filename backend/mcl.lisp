@@ -1,5 +1,5 @@
 ;;;; $Id: mcl.lisp 706 2012-12-11 06:24:47Z ctian $
-;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.6.0/backend/mcl.lisp $
+;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.6.0.1/backend/mcl.lisp $
 
 ;; MCL backend for USOCKET 0.4.1
 ;; Terje Norderhaug <terje@in-progress.com>, January 1, 2009

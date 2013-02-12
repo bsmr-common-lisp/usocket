@@ -1,5 +1,5 @@
 ;;;; $Id: cmucl.lisp 685 2012-02-04 15:56:00Z ctian $
-;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.6.0/backend/cmucl.lisp $
+;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.6.0.1/backend/cmucl.lisp $
 
 ;;;; See LICENSE for licensing information.
 

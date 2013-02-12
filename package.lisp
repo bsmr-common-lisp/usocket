@@ -1,5 +1,5 @@
 ;;;; $Id: package.lisp 675 2011-10-01 14:49:26Z ctian $
-;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.6.0/package.lisp $
+;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.6.0.1/package.lisp $
 
 ;;;; See the LICENSE file for licensing information.
 

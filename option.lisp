@@ -1,5 +1,5 @@
-;;;; $Id: option.lisp 707 2012-12-26 15:25:06Z ctian $
-;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.6.0/option.lisp $
+;;;; $Id: option.lisp 710 2012-12-27 03:13:03Z ctian $
+;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.6.0.1/option.lisp $
 
 ;;;; SOCKET-OPTION, a high-level socket option get/set framework
 
@@ -166,11 +166,13 @@
     (int->bool (get-socket-option-broadcast socket))
     #+cmu
     () ; TODO
+    #+ecl
+    () ; TODO
     #+lispworks
     () ; TODO
     #+mcl
     () ; TODO
-    #+(or ecl sbcl)
+    #+sbcl
     (sb-bsd-sockets:sockopt-broadcast socket)
     #+scl
     ())) ; TODO
@@ -190,11 +192,13 @@
     (set-socket-option-broadcast socket (bool->int new-value))
     #+cmu
     () ; TODO
+    #+ecl
+    () ; TODO
     #+lispworks
     () ; TODO
     #+mcl
     () ; TODO
-    #+(or ecl sbcl)
+    #+sbcl
     (setf (sb-bsd-sockets:sockopt-broadcast socket) new-value)
     #+scl
     () ; TODO

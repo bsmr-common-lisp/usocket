@@ -1,5 +1,5 @@
 ;;;; $Id: clisp.lisp 696 2012-11-10 15:24:33Z ctian $
-;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.6.0/backend/clisp.lisp $
+;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.6.0.1/backend/clisp.lisp $
 
 ;;;; See LICENSE for licensing information.
 

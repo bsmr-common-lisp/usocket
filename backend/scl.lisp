@@ -1,5 +1,5 @@
 ;;;; $Id: scl.lisp 685 2012-02-04 15:56:00Z ctian $
-;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.6.0/backend/scl.lisp $
+;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.6.0.1/backend/scl.lisp $
 
 ;;;; See LICENSE for licensing information.
 

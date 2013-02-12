@@ -1,5 +1,5 @@
 ;;;; $Id: test-datagram.lisp 660 2011-05-11 13:08:19Z ctian $
-;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.6.0/test/test-datagram.lisp $
+;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.6.0.1/test/test-datagram.lisp $
 
 (in-package :usocket-test)
 

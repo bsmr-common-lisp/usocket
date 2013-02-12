@@ -1,6 +1,6 @@
 ;;;; -*- Mode: Lisp -*-
 ;;;; $Id: ecl.lisp 704 2012-12-10 06:01:56Z ctian $
-;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.6.0/backend/ecl.lisp $
+;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.6.0.1/backend/ecl.lisp $
 
 ;;;; Foreign functions defined by ECL's DFFI, used for #+ecl-bytecmp only.
 ;;;; See LICENSE for licensing information.

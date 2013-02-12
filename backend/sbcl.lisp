@@ -1,6 +1,6 @@
 ;;;; -*- Mode: Lisp -*-
 ;;;; $Id: sbcl.lisp 703 2012-12-09 12:53:52Z ctian $
-;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.6.0/backend/sbcl.lisp $
+;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.6.0.1/backend/sbcl.lisp $
 
 ;;;; See LICENSE for licensing information.
 
