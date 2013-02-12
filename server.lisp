@@ -1,5 +1,5 @@
 ;;;; $Id: server.lisp 644 2011-04-29 10:17:19Z ctian $
-;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.2/server.lisp $
+;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.3/server.lisp $
 
 (in-package :usocket)
 

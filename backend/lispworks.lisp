@@ -1,5 +1,5 @@
-;;;; $Id: lispworks.lisp 651 2011-05-01 11:25:13Z ctian $
-;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.2/backend/lispworks.lisp $
+;;;; $Id: lispworks.lisp 666 2011-06-30 16:38:18Z ctian $
+;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.3/backend/lispworks.lisp $
 
 ;;;; See LICENSE for licensing information.
 
@@ -28,8 +28,7 @@
 
 #+win32
 (eval-when (:load-toplevel :execute)
-  (fli:register-module "ws2_32")
-  (comm::ensure-sockets))
+  (fli:register-module "ws2_32"))
 
 (fli:define-foreign-function (get-host-name-internal "gethostname" :source)
       ((return-string (:reference-return (:ef-mb-string :limit 257)))
@@ -188,6 +187,20 @@
   "Open a unconnected UDP socket.
    For binding on address ANY(*), just not set LOCAL-ADDRESS (NIL),
    for binding on random free unused port, set LOCAL-PORT to 0."
+
+  ;; Note: move (ensure-sockets) here to make sure delivered applications
+  ;; correctly have networking support initialized.
+  ;;
+  ;; Following words was from Martin Simmons, forwarded by Camille Troillard:
+
+  ;; Calling comm::ensure-sockets at load time looks like a bug in Lispworks-udp
+  ;; (it is too early and also unnecessary).
+
+  ;; The LispWorks comm package calls comm::ensure-sockets when it is needed, so I
+  ;; think open-udp-socket should probably do it too.  Calling it more than once is
+  ;; safe and it will be very fast after the first time.
+  #+win32 (comm::ensure-sockets)
+
   (let ((socket-fd (comm::socket comm::*socket_af_inet* *socket_sock_dgram* *socket_ip_proto_udp*)))
     (if socket-fd
       (progn

@@ -1,5 +1,5 @@
 ;;;; $Id: abcl.lisp 643 2011-04-29 10:16:40Z ctian $
-;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.2/backend/abcl.lisp $
+;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.3/backend/abcl.lisp $
 
 ;;;; New ABCL networking support (replacement to old armedbear.lisp)
 ;;;; Author: Chun Tian (binghe)

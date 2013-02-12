@@ -1,5 +1,5 @@
 ;;;; $Id: openmcl.lisp 634 2011-04-01 12:41:51Z ctian $
-;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.2/backend/openmcl.lisp $
+;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.3/backend/openmcl.lisp $
 
 ;;;; See LICENSE for licensing information.
 
