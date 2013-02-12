@@ -1,6 +1,6 @@
 ;;;; -*- Mode: Lisp -*-
-;;;; $Id: usocket.asd 675 2011-10-01 14:49:26Z ctian $
-;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.4/usocket.asd $
+;;;; $Id: usocket.asd 688 2012-02-27 14:56:33Z ctian $
+;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.5/usocket.asd $
 
 ;;;; See the LICENSE file for licensing information.
 
@@ -8,7 +8,7 @@
     :name "usocket"
     :author "Erik Enge & Erik Huelsmann"
     :maintainer "Chun Tian (binghe)"
-    :version "0.6.0"
+    :version "0.5.5"
     :licence "MIT"
     :description "Universal socket library for Common Lisp"
     :depends-on (#+sbcl :sb-bsd-sockets)
@@ -30,8 +30,7 @@
 			       #+mcl		(:file "mcl")
 			       #+openmcl	(:file "openmcl")
 			       #+allegro	(:file "allegro")))
-                 (:file "option" :depends-on ("backend"))
-		 (:file "server" :depends-on ("backend" "option"))))
+		 (:file "server" :depends-on ("backend"))))
 
 (defmethod perform ((op test-op) (c (eql (find-system :usocket))))
   (oos 'load-op :usocket-test)

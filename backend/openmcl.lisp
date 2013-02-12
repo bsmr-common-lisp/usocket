@@ -1,5 +1,5 @@
-;;;; $Id: openmcl.lisp 614 2011-03-30 08:16:10Z ctian $
-;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.4/backend/openmcl.lisp $
+;;;; $Id: openmcl.lisp 687 2012-02-27 14:49:55Z ctian $
+;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.5/backend/openmcl.lisp $
 
 ;;;; See LICENSE for licensing information.
 
@@ -85,6 +85,8 @@
 (defun socket-connect (host port &key (protocol :stream) (element-type 'character)
 		       timeout deadline nodelay
                        local-host local-port)
+  (when (eq nodelay :if-supported)
+    (setf nodelay t))
   (with-mapped-conditions ()
     (ecase protocol
       (:stream

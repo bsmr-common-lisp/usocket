@@ -1,5 +1,5 @@
-;;;; $Id: cmucl.lisp 635 2011-04-01 16:52:18Z ctian $
-;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.4/backend/cmucl.lisp $
+;;;; $Id: cmucl.lisp 687 2012-02-27 14:49:55Z ctian $
+;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.5/backend/cmucl.lisp $
 
 ;;;; See LICENSE for licensing information.
 
@@ -56,10 +56,11 @@
 		       (local-port nil local-port-p)
 		       &aux
 		       (local-bind-p (fboundp 'ext::bind-inet-socket)))
-  (declare (ignore nodelay))
   (when timeout (unsupported 'timeout 'socket-connect))
   (when deadline (unsupported 'deadline 'socket-connect))
-  (when nodelay-specified (unsupported 'nodelay 'socket-connect))
+  (when (and nodelay-specified 
+             (not (eq nodelay :if-supported)))
+    (unsupported 'nodelay 'socket-connect))
   (when (and local-host-p (not local-bind-p))
      (unsupported 'local-host 'socket-connect :minimum "Snapshot 2008-08 (19E)"))
   (when (and local-port-p (not local-bind-p))

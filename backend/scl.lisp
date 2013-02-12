@@ -1,5 +1,5 @@
-;;;; $Id: scl.lisp 635 2011-04-01 16:52:18Z ctian $
-;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.4/backend/scl.lisp $
+;;;; $Id: scl.lisp 687 2012-02-27 14:49:55Z ctian $
+;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.5/backend/scl.lisp $
 
 ;;;; See LICENSE for licensing information.
 
@@ -34,8 +34,9 @@
 		       (local-port nil local-port-p)
 		       &aux
 		       (patch-udp-p (fboundp 'ext::inet-socket-send-to)))
-  (declare (ignore nodelay))
-  (when nodelay-specified (unsupported 'nodelay 'socket-connect))
+  (when (and nodelay-specified 
+             (not (eq nodelay :if-supported)))
+    (unsupported 'nodelay 'socket-connect))
   (when deadline (unsupported 'deadline 'socket-connect))
   (when timeout (unsupported 'timeout 'socket-connect))
   (when (and local-host-p (not patch-udp-p))

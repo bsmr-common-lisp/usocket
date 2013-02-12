@@ -1,5 +1,5 @@
-;;;; $Id: server.lisp 660 2011-05-11 13:08:19Z ctian $
-;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.4/server.lisp $
+;;;; $Id: server.lisp 678 2011-11-11 01:40:53Z ctian $
+;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.5/server.lisp $
 
 (in-package :usocket)
 
@@ -80,7 +80,8 @@
                        &key element-type multi-threading)
   (let ((real-function #'(lambda (client-socket &rest arguments)
                            (unwind-protect
-                               (apply function (socket-stream client-socket) arguments)
+                               (multiple-value-bind (*remote-host* *remote-port*) (get-peer-name client-socket)
+				 (apply function (socket-stream client-socket) arguments))
                              (close (socket-stream client-socket))
                              (socket-close client-socket)
                              nil))))

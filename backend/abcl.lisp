@@ -1,5 +1,5 @@
-;;;; $Id: abcl.lisp 660 2011-05-11 13:08:19Z ctian $
-;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.4/backend/abcl.lisp $
+;;;; $Id: abcl.lisp 687 2012-02-27 14:49:55Z ctian $
+;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.5/backend/abcl.lisp $
 
 ;;;; New ABCL networking support (replacement to old armedbear.lisp)
 ;;;; Author: Chun Tian (binghe)
@@ -212,7 +212,8 @@
 	 (setq stream (ext:get-socket-stream socket :element-type element-type)
 	       usocket (make-stream-socket :stream stream :socket socket))
 	 (when nodelay-supplied-p
-	   (jcall $@setTcpNoDelay/1 socket (if nodelay +java-true+ +java-false+)))
+	   (jcall $@setTcpNoDelay/1 socket (if nodelay ;; both t and :if-supported mean +java-true+
+                                           +java-true+ +java-false+)))
 	 (when timeout
 	   (jcall $@setSoTimeout/Socket/1 socket (truncate (* 1000 timeout))))))
       (:datagram ; UDP

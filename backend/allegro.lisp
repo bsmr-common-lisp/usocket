@@ -1,5 +1,5 @@
-;;;; $Id: allegro.lisp 671 2011-08-16 07:58:22Z hhubner $
-;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.4/backend/allegro.lisp $
+;;;; $Id: allegro.lisp 687 2012-02-27 14:49:55Z ctian $
+;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.5/backend/allegro.lisp $
 
 ;;;; See LICENSE for licensing information.
 
@@ -55,6 +55,8 @@
                        local-host local-port)
   (when timeout (unsupported 'timeout 'socket-connect))
   (when deadline (unsupported 'deadline 'socket-connect))
+  (when (eq nodelay :if-supported)
+    (setf nodelay t))
 
   (let ((socket))
     (setf socket

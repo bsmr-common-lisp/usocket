@@ -1,5 +1,5 @@
-;;;; $Id: test-usocket.lisp 660 2011-05-11 13:08:19Z ctian $
-;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.4/test/test-usocket.lisp $
+;;;; $Id: test-usocket.lisp 646 2011-05-01 05:04:23Z ctian $
+;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.5/test/test-usocket.lisp $
 
 ;;;; See LICENSE for licensing information.
 

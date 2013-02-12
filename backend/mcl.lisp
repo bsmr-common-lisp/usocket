@@ -1,5 +1,5 @@
-;;;; $Id: mcl.lisp 668 2011-08-13 05:58:27Z ctian $
-;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.4/backend/mcl.lisp $
+;;;; $Id: mcl.lisp 687 2012-02-27 14:49:55Z ctian $
+;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.5/backend/mcl.lisp $
 
 ;; MCL backend for USOCKET 0.4.1
 ;; Terje Norderhaug <terje@in-progress.com>, January 1, 2009
@@ -73,6 +73,8 @@
 
 (defun socket-connect (host port &key (element-type 'character) timeout deadline nodelay 
                             local-host local-port (protocol :stream))
+  (when (eq nodelay :if-supported)
+    (setf nodelay t))
   (when (eq protocol :datagram)
     (unsupported '(protocol :datagram) 'socket-connect))
   (with-mapped-conditions ()
