@@ -1,6 +1,6 @@
 ;;;; -*- Mode: Lisp -*-
 ;;;; $Id: usocket.asd 633 2011-04-01 12:06:23Z ctian $
-;;;; $URL: svn+ssh://common-lisp.net/project/usocket/svn/usocket/tags/0.5.1/usocket.asd $
+;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.2/usocket.asd $
 
 ;;;; See the LICENSE file for licensing information.
 

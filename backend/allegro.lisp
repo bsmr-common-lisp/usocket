@@ -1,5 +1,5 @@
 ;;;; $Id: allegro.lisp 618 2011-03-31 03:22:37Z ctian $
-;;;; $URL: svn+ssh://common-lisp.net/project/usocket/svn/usocket/tags/0.5.1/backend/allegro.lisp $
+;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.2/backend/allegro.lisp $
 
 ;;;; See LICENSE for licensing information.
 

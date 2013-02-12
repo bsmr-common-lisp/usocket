@@ -1,5 +1,5 @@
-;;;; $Id: test-usocket.lisp 616 2011-03-30 15:13:37Z ctian $
-;;;; $URL: svn+ssh://common-lisp.net/project/usocket/svn/usocket/tags/0.5.1/test/test-usocket.lisp $
+;;;; $Id: test-usocket.lisp 646 2011-05-01 05:04:23Z ctian $
+;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.2/test/test-usocket.lisp $
 
 ;;;; See LICENSE for licensing information.
 
@@ -156,42 +156,6 @@
           (equal (usocket::get-local-address sock) *local-ip*)
         (usocket:socket-close sock))))
   t)
-
-(eval-when (:compile-toplevel :load-toplevel :execute)
-  (defparameter *wait-for-input-timeout* 2))
-
-(deftest wait-for-input.1
-  (with-caught-conditions (nil nil)
-    (let ((sock (usocket:socket-connect *common-lisp-net* 80))
-          (time (get-universal-time)))
-      (unwind-protect
-          (progn (usocket:wait-for-input sock :timeout *wait-for-input-timeout*)
-            (- (get-universal-time) time))
-        (usocket:socket-close sock))))
-  #.*wait-for-input-timeout*)
-
-(deftest wait-for-input.2
-  (with-caught-conditions (nil nil)
-    (let ((sock (usocket:socket-connect *common-lisp-net* 80))
-          (time (get-universal-time)))
-      (unwind-protect
-          (progn (usocket:wait-for-input sock :timeout *wait-for-input-timeout* :ready-only t)
-            (- (get-universal-time) time))
-        (usocket:socket-close sock))))
-  #.*wait-for-input-timeout*)
-
-(deftest wait-for-input.3
-  (with-caught-conditions (nil nil)
-    (let ((sock (usocket:socket-connect *common-lisp-net* 80)))
-      (unwind-protect
-          (progn
-            (format (usocket:socket-stream sock)
-                    "GET / HTTP/1.0~2%")
-            (force-output (usocket:socket-stream sock))
-            (usocket:wait-for-input sock :timeout *wait-for-input-timeout*)
-            (subseq (read-line (usocket:socket-stream sock)) 0 15))
-        (usocket:socket-close sock))))
-  "HTTP/1.1 200 OK")
 
 (defun run-usocket-tests ()
   (do-tests))

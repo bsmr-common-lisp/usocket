@@ -1,5 +1,5 @@
-;;;; $Id: server.lisp 602 2011-03-29 13:31:40Z ctian $
-;;;; $URL: svn+ssh://common-lisp.net/project/usocket/svn/usocket/tags/0.5.1/server.lisp $
+;;;; $Id: server.lisp 644 2011-04-29 10:17:19Z ctian $
+;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.2/server.lisp $
 
 (in-package :usocket)
 
@@ -8,7 +8,8 @@
                            ;; for udp
                            (timeout 1) (max-buffer-size +max-datagram-packet-size+)
                            ;; for tcp
-                           element-type reuse-address multi-threading)
+                           element-type reuse-address multi-threading
+                           name)
   (let* ((real-host (or host *wildcard-host*))
          (socket (ecase protocol
                    (:stream
@@ -31,7 +32,7 @@
                                   :timeout timeout
                                   :max-buffer-size max-buffer-size)))))
       (if in-new-thread
-	  (values (spawn-thread "USOCKET Server" #'real-call) socket)
+	  (values (spawn-thread (or name "USOCKET Server") #'real-call) socket)
 	  (real-call)))))
 
 (defvar *remote-host*)
@@ -81,7 +82,8 @@
                            (unwind-protect
                                (apply function (socket-stream client-socket) arguments)
                              (close (socket-stream client-socket))
-                             (socket-close client-socket)))))
+                             (socket-close client-socket)
+                             nil))))
     (unwind-protect
         (loop do
           (let* ((client-socket (apply #'socket-accept

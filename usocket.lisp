@@ -1,5 +1,5 @@
-;;;; $Id: usocket.lisp 621 2011-03-31 11:06:20Z ctian $
-;;;; $URL: svn+ssh://common-lisp.net/project/usocket/svn/usocket/tags/0.5.1/usocket.lisp $
+;;;; $Id: usocket.lisp 653 2011-05-01 11:27:58Z ctian $
+;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.2/usocket.lisp $
 
 ;;;; See LICENSE for licensing information.
 
@@ -323,9 +323,10 @@ the values documented in usocket.lisp in the usocket class."
           (values (if ready-only socks socket-or-sockets) to)))))
   (let* ((start (get-internal-real-time))
          (sockets-ready 0))
-    #-(and win32 (or sbcl ecl))
     (dolist (x (wait-list-waiters socket-or-sockets))
       (when (setf (state x)
+                  #+(and win32 (or sbcl ecl)) NIL ; they cannot relay on LISTEN
+                  #-(and win32 (or sbcl ecl))
                   (if (and (stream-usocket-p x)
                            (listen (socket-stream x)))
                       :READ NIL))

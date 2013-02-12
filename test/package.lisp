@@ -1,11 +1,13 @@
-;;;; $Id: package.lisp 528 2010-06-29 12:16:48Z ctian $
-;;;; $URL: svn+ssh://common-lisp.net/project/usocket/svn/usocket/tags/0.5.1/test/package.lisp $
+;;;; $Id: package.lisp 646 2011-05-01 05:04:23Z ctian $
+;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.2/test/package.lisp $
 
 ;;;; See the LICENSE file for licensing information.
 
 (in-package :cl-user)
 
 (defpackage :usocket-test
-  (:use :cl :regression-test)
-  (:nicknames :usoct)
-  (:export :do-tests :run-usocket-tests))
+  (:use :common-lisp
+	:usocket
+	:regression-test)
+  (:export #:do-tests
+	   #:run-usocket-tests))

@@ -1,5 +1,5 @@
 ;;;; $Id: test-condition.lisp 599 2011-03-29 13:04:27Z ctian $
-;;;; $URL: svn+ssh://common-lisp.net/project/usocket/svn/usocket/tags/0.5.1/test/test-condition.lisp $
+;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.2/test/test-condition.lisp $
 
 (in-package :usocket-test)
 
