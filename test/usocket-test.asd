@@ -1,5 +1,5 @@
 ;;;; $Id: usocket-test.asd 46 2006-02-06 20:50:07Z ehuelsmann $
-;;;; $URL: svn+ssh://ehuelsmann@common-lisp.net/project/usocket/svn/usocket/tags/0.4.0/test/usocket-test.asd $
+;;;; $URL: svn+ssh://ehuelsmann@common-lisp.net/project/usocket/svn/usocket/tags/0.4.1/test/usocket-test.asd $
 
 ;;;; See the LICENSE file for licensing information.
 

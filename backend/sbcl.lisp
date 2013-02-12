@@ -1,5 +1,5 @@
-;;;; $Id: sbcl.lisp 460 2008-10-26 13:08:45Z ehuelsmann $
-;;;; $URL: svn+ssh://ehuelsmann@common-lisp.net/project/usocket/svn/usocket/tags/0.4.0/backend/sbcl.lisp $
+;;;; $Id: sbcl.lisp 485 2008-12-26 14:31:49Z ctian $
+;;;; $URL: svn+ssh://ehuelsmann@common-lisp.net/project/usocket/svn/usocket/tags/0.4.1/backend/sbcl.lisp $
 
 ;;;; See LICENSE for licensing information.
 
@@ -229,8 +229,10 @@
                ;;###FIXME: The above line probably needs an :external-format
                (usocket (make-stream-socket :stream stream :socket socket))
                (ip (host-to-vector-quad host)))
+	  ;; binghe: use SOCKOPT-TCP-NODELAY as internal symbol
+	  ;;         to pass compilation on ECL without it.
           (when (and nodelay-specified sockopt-tcp-nodelay-p)
-            (setf (sb-bsd-sockets:sockopt-tcp-nodelay socket) nodelay))
+            (setf (sb-bsd-sockets::sockopt-tcp-nodelay socket) nodelay))
           (when (or local-host local-port)
             (sb-bsd-sockets:socket-bind socket
                                         (host-to-vector-quad
@@ -351,7 +353,7 @@
                 (1+ (reduce #'max (wait-list-%wait sockets)
                             :key #'sb-bsd-sockets:socket-file-descriptor))
                 (sb-alien:addr rfds) nil nil
-                (when timeout secs) musecs)
+                (when timeout secs) (when timeout musecs))
 	     (if (null count)
 		 (unless (= err sb-unix:EINTR)
 		   (error (map-errno-error err)))

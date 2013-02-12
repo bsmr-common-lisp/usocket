@@ -1,5 +1,5 @@
-;;;; $Id: lispworks.lisp 448 2008-10-21 19:18:02Z ctian $
-;;;; $URL: svn+ssh://ehuelsmann@common-lisp.net/project/usocket/svn/usocket/tags/0.4.0/backend/lispworks.lisp $
+;;;; $Id: lispworks.lisp 476 2008-11-12 14:18:15Z ctian $
+;;;; $URL: svn+ssh://ehuelsmann@common-lisp.net/project/usocket/svn/usocket/tags/0.4.1/backend/lispworks.lisp $
 
 ;;;; See LICENSE for licensing information.
 
@@ -93,11 +93,19 @@
                        timeout deadline (nodelay t nodelay-specified)
                        local-host local-port)
   (declare (ignorable nodelay))
-  (when timeout (unimplemented 'timeout 'socket-connect))
-  (when deadline (unsupported 'deadline 'socket-connect :minimum "LispWorks 5.1"))
+
+  ;; What's the meaning of this keyword?
+  (when deadline
+    (unimplemented 'deadline 'socket-connect))
+
+  #+(and lispworks4 (not lispworks4.4)) ; < 4.4.5
+  (when timeout
+    (unsupported 'timeout 'socket-connect :minimum "LispWorks 4.4.5"))
   
-  #+(and (not lispworks4) (not lispworks5.0))
-  (when nodelay-specified (unimplemented 'nodelay 'socket-connect))
+  #+(or lispworks4 lispworks5.0) ; < 5.1
+  (when nodelay-specified
+    (unsupported 'nodelay 'socket-connect :minimum "LispWorks 5.1"))
+
   #+lispworks4 #+lispworks4
   (when local-host
      (unsupported 'local-host 'socket-connect :minimum "LispWorks 5.0"))
@@ -110,12 +118,15 @@
           (with-mapped-conditions ()
              (comm:open-tcp-stream hostname port
                                    :element-type element-type
+				   #-(and lispworks4 (not lispworks4.4)) ; >= 4.4.5
+				   #-(and lispworks4 (not lispworks4.4))
+				   :timeout timeout
                                    #-lispworks4 #-lispworks4
                                    #-lispworks4 #-lispworks4
                                    :local-address (when local-host (host-to-hostname local-host))
                                    :local-port local-port
-                                   #+(and (not lispworks4) (not lispworks5.0))
-                                   #+(and (not lispworks4) (not lispworks5.0))
+                                   #-(or lispworks4 lispworks5.0) ; >= 5.1
+                                   #-(or lispworks4 lispworks5.0)
                                    :nodelay nodelay)))
     (if stream
         (make-stream-socket :socket (comm:socket-stream-socket stream)

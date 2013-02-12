@@ -1,5 +1,5 @@
-;;;; $Id: scl.lisp 454 2008-10-22 13:35:22Z ctian $
-;;;; $URL: svn+ssh://ehuelsmann@common-lisp.net/project/usocket/svn/usocket/tags/0.4.0/backend/scl.lisp $
+;;;; $Id: scl.lisp 479 2008-11-26 16:18:06Z ctian $
+;;;; $URL: svn+ssh://ehuelsmann@common-lisp.net/project/usocket/svn/usocket/tags/0.4.1/backend/scl.lisp $
 
 ;;;; See LICENSE for licensing information.
 
@@ -22,11 +22,11 @@
 
 (defun handle-condition (condition &optional (socket nil))
   "Dispatch correct usocket condition."
-  (etypecase condition
+  (typecase condition
     (ext::socket-error
      (scl-map-socket-error (ext::socket-errno condition)
-               :socket socket
-               :condition condition))))
+			   :socket socket
+			   :condition condition))))
 
 (defun socket-connect (host port &key (element-type 'character)
                        timeout deadline (nodelay t nodelay-specified)
@@ -39,13 +39,14 @@
   (when deadline (unsupported 'deadline 'socket-connect))
   (when timeout (unsupported 'timeout 'socket-connect))
   (when (and local-host-p (not patch-udp-p))
-     (unsupported 'local-host 'socket-connect :minimum "1.3.8.2"))
+     (unsupported 'local-host 'socket-connect :minimum "1.3.9"))
   (when (and local-port-p (not patch-udp-p))
-     (unsupported 'local-port 'socket-connect :minimum "1.3.8.2"))
+     (unsupported 'local-port 'socket-connect :minimum "1.3.9"))
 
   (let* ((socket (let ((args (list (host-to-hbo host) port :kind :stream)))
 		   (when (and patch-udp-p (or local-host-p local-port-p))
-		     (nconc args (list :local-host (host-to-hbo local-host)
+		     (nconc args (list :local-host (when local-host
+						     (host-to-hbo local-host))
 				       :local-port local-port)))
 		   (with-mapped-conditions ()
 		     (apply #'ext:connect-to-inet-socket args))))

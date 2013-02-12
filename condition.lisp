@@ -1,5 +1,5 @@
-;;;; $Id: condition.lisp 448 2008-10-21 19:18:02Z ctian $
-;;;; $URL: svn+ssh://ehuelsmann@common-lisp.net/project/usocket/svn/usocket/tags/0.4.0/condition.lisp $
+;;;; $Id: condition.lisp 485 2008-12-26 14:31:49Z ctian $
+;;;; $URL: svn+ssh://ehuelsmann@common-lisp.net/project/usocket/svn/usocket/tags/0.4.1/condition.lisp $
 
 ;;;; See LICENSE for licensing information.
 
@@ -184,7 +184,7 @@ error available."))
     ((9) . bad-file-descriptor-error)
     ((61 111) . connection-refused-error)
     ((64 131) . connection-reset-error)
-    ((130) . connection-aborted-error)
+    ((53 103) . connection-aborted-error)
     ((22) . invalid-argument-error)
     ((55 105) . no-buffers-error)
     ((12) . out-of-memory-error)

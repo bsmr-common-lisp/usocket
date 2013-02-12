@@ -1,5 +1,5 @@
-;;;; $Id: cmucl.lisp 454 2008-10-22 13:35:22Z ctian $
-;;;; $URL: svn+ssh://ehuelsmann@common-lisp.net/project/usocket/svn/usocket/tags/0.4.0/backend/cmucl.lisp $
+;;;; $Id: cmucl.lisp 470 2008-10-28 12:02:01Z ctian $
+;;;; $URL: svn+ssh://ehuelsmann@common-lisp.net/project/usocket/svn/usocket/tags/0.4.1/backend/cmucl.lisp $
 
 ;;;; See LICENSE for licensing information.
 
@@ -69,7 +69,9 @@
     (setf socket
 	  (let ((args (list (host-to-hbo host) port :stream)))
 	    (when (and local-bind-p (or local-host-p local-port-p))
-	      (nconc args (list :local-host local-host :local-port local-port)))
+	      (nconc args (list :local-host (when local-host
+					      (host-to-hbo local-host))
+				:local-port local-port)))
 	    (with-mapped-conditions (socket)
 	      (apply #'ext:connect-to-inet-socket args))))
     (if socket

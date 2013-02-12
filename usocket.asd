@@ -1,6 +1,6 @@
 
-;;;; $Id: usocket.asd 461 2008-10-26 13:19:29Z ehuelsmann $
-;;;; $URL: svn+ssh://ehuelsmann@common-lisp.net/project/usocket/svn/usocket/tags/0.4.0/usocket.asd $
+;;;; $Id: usocket.asd 486 2008-12-27 21:53:50Z ehuelsmann $
+;;;; $URL: svn+ssh://ehuelsmann@common-lisp.net/project/usocket/svn/usocket/tags/0.4.1/usocket.asd $
 
 ;;;; See the LICENSE file for licensing information.
 
@@ -14,7 +14,7 @@
 (defsystem usocket
     :name "usocket"
     :author "Erik Enge & Erik Huelsmann"
-    :version "0.4.0"
+    :version "0.4.1"
     :licence "MIT"
     :description "Universal socket library for Common Lisp"
     :depends-on (:split-sequence
