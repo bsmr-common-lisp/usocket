@@ -1,17 +1,19 @@
-;;;; $Id: lispworks.lisp 476 2008-11-12 14:18:15Z ctian $
-;;;; $URL: svn+ssh://ehuelsmann@common-lisp.net/project/usocket/svn/usocket/tags/0.4.1/backend/lispworks.lisp $
+;;;; $Id: lispworks.lisp 572 2010-12-08 08:17:40Z ctian $
+;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.0/backend/lispworks.lisp $
 
 ;;;; See LICENSE for licensing information.
 
 (in-package :usocket)
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
-  (require "comm"))
+  (require "comm")
+
+  #+lispworks3
+  (error "LispWorks 3 is not supported by USOCKET."))
 
 ;;; ---------------------------------------------------------------------------
 ;;;  Warn if multiprocessing is not running on Lispworks
 
-#-win32
 (defun check-for-multiprocessing-started (&optional errorp)
   (unless mp:*current-process*
     (funcall (if errorp 'error 'warn)
@@ -21,11 +23,13 @@
              'mp:initialize-multiprocessing
              'wait-for-input)))
 
-#-win32
-(check-for-multiprocessing-started)
+(eval-when (:load-toplevel :execute)
+  (check-for-multiprocessing-started))
 
 #+win32
-(fli:register-module "ws2_32")
+(eval-when (:load-toplevel :execute)
+  (fli:register-module "ws2_32")
+  (comm::ensure-sockets))
 
 (fli:define-foreign-function (get-host-name-internal "gethostname" :source)
       ((return-string (:reference-return (:ef-mb-string :limit 257)))
@@ -64,10 +68,10 @@
     (if usock-err
         (if (subtypep usock-err 'error)
             (error usock-err :socket socket)
-          (signal usock-err :socket))
+          (signal usock-err :socket socket))
       (error 'unknown-error
              :socket socket
-             :real-condition nil))))
+             :real-error nil))))
 
 (defun raise-usock-err (errno socket &optional condition)
   (let* ((usock-err
@@ -89,9 +93,166 @@
                     (declare (ignore host port err-msg))
                     (raise-usock-err errno socket condition)))))
 
-(defun socket-connect (host port &key (element-type 'base-char)
+(defconstant *socket_sock_dgram* 2
+  "Connectionless, unreliable datagrams of fixed maximum length.")
+
+(defconstant *sockopt_so_rcvtimeo*
+  #+(not linux) #x1006
+  #+linux 20
+  "Socket receive timeout")
+
+(fli:define-c-struct timeval
+  (tv-sec :long)
+  (tv-usec :long))
+
+;;; ssize_t
+;;; recvfrom(int socket, void *restrict buffer, size_t length, int flags,
+;;;          struct sockaddr *restrict address, socklen_t *restrict address_len);
+(fli:define-foreign-function (%recvfrom "recvfrom" :source)
+    ((socket :int)
+     (buffer (:pointer (:unsigned :byte)))
+     (length :int)
+     (flags :int)
+     (address (:pointer (:struct comm::sockaddr)))
+     (address-len (:pointer :int)))
+  :result-type :int
+  #+win32 :module
+  #+win32 "ws2_32")
+
+;;; ssize_t
+;;; sendto(int socket, const void *buffer, size_t length, int flags,
+;;;        const struct sockaddr *dest_addr, socklen_t dest_len);
+(fli:define-foreign-function (%sendto "sendto" :source)
+    ((socket :int)
+     (buffer (:pointer (:unsigned :byte)))
+     (length :int)
+     (flags :int)
+     (address (:pointer (:struct comm::sockaddr)))
+     (address-len :int))
+  :result-type :int
+  #+win32 :module
+  #+win32 "ws2_32")
+
+#-win32
+(defun set-socket-receive-timeout (socket-fd seconds)
+  "Set socket option: RCVTIMEO, argument seconds can be a float number"
+  (declare (type integer socket-fd)
+           (type number seconds))
+  (multiple-value-bind (sec usec) (truncate seconds)
+    (fli:with-dynamic-foreign-objects ((timeout (:struct timeval)))
+      (fli:with-foreign-slots (tv-sec tv-usec) timeout
+        (setf tv-sec sec
+              tv-usec (truncate (* 1000000 usec)))
+        (if (zerop (comm::setsockopt socket-fd
+                               comm::*sockopt_sol_socket*
+                               *sockopt_so_rcvtimeo*
+                               (fli:copy-pointer timeout
+                                                 :type '(:pointer :void))
+                               (fli:size-of '(:struct timeval))))
+            seconds)))))
+
+#+win32
+(defun set-socket-receive-timeout (socket-fd seconds)
+  "Set socket option: RCVTIMEO, argument seconds can be a float number.
+   On win32, you must bind the socket before use this function."
+  (declare (type integer socket-fd)
+           (type number seconds))
+  (fli:with-dynamic-foreign-objects ((timeout :int))
+    (setf (fli:dereference timeout)
+          (truncate (* 1000 seconds)))
+    (if (zerop (comm::setsockopt socket-fd
+                           comm::*sockopt_sol_socket*
+                           *sockopt_so_rcvtimeo*
+                           (fli:copy-pointer timeout
+                                             :type '(:pointer :char))
+                           (fli:size-of :int)))
+        seconds)))
+
+#-win32
+(defmethod get-socket-receive-timeout (socket-fd)
+  "Get socket option: RCVTIMEO, return value is a float number"
+  (declare (type integer socket-fd))
+  (fli:with-dynamic-foreign-objects ((timeout (:struct timeval))
+                                     (len :int))
+    (comm::getsockopt socket-fd
+                comm::*sockopt_sol_socket*
+                *sockopt_so_rcvtimeo*
+                (fli:copy-pointer timeout
+                                  :type '(:pointer :void))
+                len)
+    (fli:with-foreign-slots (tv-sec tv-usec) timeout
+      (float (+ tv-sec (/ tv-usec 1000000))))))
+
+#+win32
+(defmethod get-socket-receive-timeout (socket-fd)
+  "Get socket option: RCVTIMEO, return value is a float number"
+  (declare (type integer socket-fd))
+  (fli:with-dynamic-foreign-objects ((timeout :int)
+                                     (len :int))
+    (comm::getsockopt socket-fd
+                comm::*sockopt_sol_socket*
+                *sockopt_so_rcvtimeo*
+                (fli:copy-pointer timeout
+                                  :type '(:pointer :void))
+                len)
+    (float (/ (fli:dereference timeout) 1000))))
+
+(defun open-udp-socket (&key local-address local-port read-timeout)
+  "Open a unconnected UDP socket.
+   For binding on address ANY(*), just not set LOCAL-ADDRESS (NIL),
+   for binding on random free unused port, set LOCAL-PORT to 0."
+  (let ((socket-fd (comm::socket comm::*socket_af_inet* *socket_sock_dgram* comm::*socket_pf_unspec*)))
+    (if socket-fd
+      (progn
+        (when read-timeout (set-socket-receive-timeout socket-fd read-timeout))
+        (if local-port
+            (fli:with-dynamic-foreign-objects ((client-addr (:struct comm::sockaddr_in)))
+              (comm::initialize-sockaddr_in client-addr comm::*socket_af_inet*
+                                      local-address local-port "udp")
+              (if (comm::bind socket-fd
+                        (fli:copy-pointer client-addr :type '(:struct comm::sockaddr))
+                        (fli:pointer-element-size client-addr))
+		  ;; success, return socket fd
+		  socket-fd
+		  (progn
+		    (comm::close-socket socket-fd)
+		    (error "cannot bind"))))
+	    socket-fd))
+      (error "cannot create socket"))))
+
+(defun connect-to-udp-server (hostname service
+			      &key local-address local-port read-timeout)
+  "Something like CONNECT-TO-TCP-SERVER"
+  (let ((socket-fd (open-udp-socket :local-address local-address
+				    :local-port local-port
+				    :read-timeout read-timeout)))
+    (if socket-fd
+        (fli:with-dynamic-foreign-objects ((server-addr (:struct comm::sockaddr_in)))
+          ;; connect to remote address/port
+          (comm::initialize-sockaddr_in server-addr comm::*socket_af_inet* hostname service "udp")
+          (if (comm::connect socket-fd
+			     (fli:copy-pointer server-addr :type '(:struct comm::sockaddr))
+			     (fli:pointer-element-size server-addr))
+            ;; success, return socket fd
+            socket-fd
+            ;; fail, close socket and return nil
+            (progn
+              (comm::close-socket socket-fd)
+	      (error "cannot connect"))))
+	(error "cannot create socket"))))
+
+;; Register a special free action for closing datagram usocket when being GCed
+(defun usocket-special-free-action (object)
+  (when (and (typep object 'datagram-usocket)
+             (%open-p object))
+    (socket-close object)))
+
+(eval-when (:load-toplevel :execute)
+  (hcl:add-special-free-action 'usocket-special-free-action))
+
+(defun socket-connect (host port &key (protocol :stream) (element-type 'base-char)
                        timeout deadline (nodelay t nodelay-specified)
-                       local-host local-port)
+                       local-host (local-port #+win32 *auto-port* #-win32 nil))
   (declare (ignorable nodelay))
 
   ;; What's the meaning of this keyword?
@@ -101,7 +262,7 @@
   #+(and lispworks4 (not lispworks4.4)) ; < 4.4.5
   (when timeout
     (unsupported 'timeout 'socket-connect :minimum "LispWorks 4.4.5"))
-  
+
   #+(or lispworks4 lispworks5.0) ; < 5.1
   (when nodelay-specified
     (unsupported 'nodelay 'socket-connect :minimum "LispWorks 5.1"))
@@ -112,26 +273,41 @@
   (when local-port
      (unsupported 'local-port 'socket-connect :minimum "LispWorks 5.0"))
 
-  (let ((hostname (host-to-hostname host))
-        (stream))
-    (setf stream
-          (with-mapped-conditions ()
-             (comm:open-tcp-stream hostname port
-                                   :element-type element-type
-				   #-(and lispworks4 (not lispworks4.4)) ; >= 4.4.5
-				   #-(and lispworks4 (not lispworks4.4))
-				   :timeout timeout
-                                   #-lispworks4 #-lispworks4
-                                   #-lispworks4 #-lispworks4
-                                   :local-address (when local-host (host-to-hostname local-host))
-                                   :local-port local-port
-                                   #-(or lispworks4 lispworks5.0) ; >= 5.1
-                                   #-(or lispworks4 lispworks5.0)
-                                   :nodelay nodelay)))
-    (if stream
-        (make-stream-socket :socket (comm:socket-stream-socket stream)
-                            :stream stream)
-      (error 'unknown-error))))
+  (ecase protocol
+    (:stream
+     (let ((hostname (host-to-hostname host))
+	   (stream))
+       (setf stream
+	     (with-mapped-conditions ()
+	       (comm:open-tcp-stream hostname port
+				     :element-type element-type
+				     #-(and lispworks4 (not lispworks4.4)) ; >= 4.4.5
+				     #-(and lispworks4 (not lispworks4.4))
+				     :timeout timeout
+				     #-lispworks4 #-lispworks4
+				     #-lispworks4 #-lispworks4
+				     :local-address (when local-host (host-to-hostname local-host))
+				     :local-port local-port
+				     #-(or lispworks4 lispworks5.0) ; >= 5.1
+				     #-(or lispworks4 lispworks5.0)
+				     :nodelay nodelay)))
+       (if stream
+	   (make-stream-socket :socket (comm:socket-stream-socket stream)
+			       :stream stream)
+	   (error 'unknown-error))))
+    (:datagram
+     (let ((usocket (make-datagram-socket
+		     (if (and host port)
+			 (connect-to-udp-server (host-to-hostname host) port
+						:local-address (and local-host (host-to-hostname local-host))
+						:local-port local-port
+                                                :read-timeout timeout)
+			 (open-udp-socket :local-address (and local-host (host-to-hostname local-host))
+					  :local-port local-port
+                                          :read-timeout timeout))
+		     :connected-p t)))
+       (hcl:flag-special-free-action usocket)
+       usocket))))
 
 (defun socket-listen (host port
                            &key reuseaddress
@@ -179,6 +355,102 @@
      (remove-waiter (wait-list usocket) usocket))
   (with-mapped-conditions (usocket)
      (comm::close-socket (socket usocket))))
+
+(defmethod socket-close :after ((socket datagram-usocket))
+  "Additional socket-close method for datagram-usocket"
+  (setf (%open-p socket) nil))
+
+(defmethod initialize-instance :after ((socket datagram-usocket) &key)
+  (setf (slot-value socket 'send-buffer)
+        (make-array +max-datagram-packet-size+
+                    :element-type '(unsigned-byte 8)
+                    :allocation :static))
+  (setf (slot-value socket 'recv-buffer)
+        (make-array +max-datagram-packet-size+
+                    :element-type '(unsigned-byte 8)
+                    :allocation :static)))
+
+(defun send-message (socket-fd message buffer &optional (length (length buffer)) host service)
+  "Send message to a socket, using sendto()/send()"
+  (declare (type integer socket-fd)
+           (type sequence buffer))
+  (fli:with-dynamic-foreign-objects ((client-addr (:struct comm::sockaddr_in))
+                                     (len :int
+                                          #-(or lispworks4 lispworks5.0) ; <= 5.0
+                                          :initial-element
+                                          (fli:size-of '(:struct comm::sockaddr_in))))
+    (fli:with-dynamic-lisp-array-pointer (ptr message :type '(:unsigned :byte))
+      (replace message buffer :end2 length)
+      (if (and host service)
+          (progn
+            (comm::initialize-sockaddr_in client-addr comm::*socket_af_inet* host service "udp")
+            (%sendto socket-fd ptr (min length +max-datagram-packet-size+) 0
+                     (fli:copy-pointer client-addr :type '(:struct comm::sockaddr))
+                     (fli:dereference len)))
+          (comm::%send socket-fd ptr (min length +max-datagram-packet-size+) 0)))))
+
+(defmethod socket-send ((socket datagram-usocket) buffer length &key host port)
+  (send-message (socket socket)
+                (slot-value socket 'send-buffer)
+                buffer length (and host (host-to-hbo host)) port))
+
+(defun receive-message (socket-fd message &optional buffer (length (length buffer))
+			&key read-timeout (max-buffer-size +max-datagram-packet-size+))
+  "Receive message from socket, read-timeout is a float number in seconds.
+
+   This function will return 4 values:
+   1. receive buffer
+   2. number of receive bytes
+   3. remote address
+   4. remote port"
+  (declare (type integer socket-fd)
+           (type sequence buffer))
+  (let (old-timeout)
+    (fli:with-dynamic-foreign-objects ((client-addr (:struct comm::sockaddr_in))
+                                       (len :int
+					    #-(or lispworks4 lispworks5.0) ; <= 5.0
+                                            :initial-element
+                                            (fli:size-of '(:struct comm::sockaddr_in))))
+      (fli:with-dynamic-lisp-array-pointer (ptr message :type '(:unsigned :byte))
+        ;; setup new read timeout
+        (when read-timeout
+          (setf old-timeout (get-socket-receive-timeout socket-fd))
+          (set-socket-receive-timeout socket-fd read-timeout))
+        (let ((n (%recvfrom socket-fd ptr max-buffer-size 0
+                            (fli:copy-pointer client-addr :type '(:struct comm::sockaddr))
+                            len)))
+          ;; restore old read timeout
+          (when (and read-timeout (/= old-timeout read-timeout))
+            (set-socket-receive-timeout socket-fd old-timeout))
+          (if (plusp n)
+              (values (if buffer
+                          (replace buffer message
+                                   :end1 (min length max-buffer-size)
+                                   :end2 (min n max-buffer-size))
+                          (subseq message 0 (min n max-buffer-size)))
+                      (min n max-buffer-size)
+                      (comm::ntohl (fli:foreign-slot-value
+                                    (fli:foreign-slot-value client-addr
+                                                            'comm::sin_addr
+                                                            :object-type '(:struct comm::sockaddr_in)
+                                                            :type '(:struct comm::in_addr)
+                                                            :copy-foreign-object nil)
+                                    'comm::s_addr
+                                    :object-type '(:struct comm::in_addr)))
+                      (comm::ntohs (fli:foreign-slot-value client-addr
+                                                           'comm::sin_port
+                                                           :object-type '(:struct comm::sockaddr_in)
+                                                           :type '(:unsigned :short)
+                                                           :copy-foreign-object nil)))
+              (values nil n 0 0)))))))
+
+(defmethod socket-receive ((socket datagram-usocket) buffer length &key timeout)
+  (multiple-value-bind (buffer size host port)
+      (receive-message (socket socket)
+                       (slot-value socket 'recv-buffer)
+                       buffer length
+                       :read-timeout timeout)
+    (values buffer size host port)))
 
 (defmethod get-local-name ((usocket usocket))
   (multiple-value-bind
@@ -260,7 +532,9 @@
 			     (wait-list-waiters wait-list))))
       (dolist (x (wait-list-waiters wait-list))
         (mp:unnotice-fd (os-socket-handle x)))
-      wait-list)))
+      wait-list))
+
+) ; end of block
 
 
 ;;;
@@ -280,6 +554,7 @@
   ;; to resort to system calls to achieve the same thing.
   ;; Luckily, it provides us access to the raw socket handles (as we 
   ;; wrote the code above.
+
   (defconstant fd-read 1)
   (defconstant fd-read-bit 0)
   (defconstant fd-write 2)
@@ -324,7 +599,8 @@
   
   (fli:define-foreign-type ws-socket () '(:unsigned :int))
   (fli:define-foreign-type win32-handle () '(:unsigned :int))
-  (fli:define-c-struct wsa-network-events (network-events :long)
+  (fli:define-c-struct wsa-network-events
+    (network-events :long)
     (error-code (:c-array :int 10)))
 
   (fli:define-foreign-function (wsa-event-create "WSACreateEvent" :source)
@@ -332,10 +608,12 @@
       :lambda-list nil
     :result-type :int
     :module "ws2_32")
+
   (fli:define-foreign-function (wsa-event-close "WSACloseEvent" :source)
       ((event-object win32-handle))
     :result-type :int
     :module "ws2_32")
+
   (fli:define-foreign-function (wsa-enum-network-events "WSAEnumNetworkEvents" :source)
       ((socket ws-socket)
        (event-object win32-handle)
@@ -387,9 +665,9 @@
           0))))
 
   (defun socket-ready-p (socket)
-     (if (typep socket 'stream-usocket)
-       (< 0 (bytes-available-for-read socket))
-       (%ready-p socket)))
+    (if (typep socket 'stream-usocket)
+        (< 0 (bytes-available-for-read socket))
+      (%ready-p socket)))
 
   (defun waiting-required (sockets)
     (notany #'socket-ready-p sockets))
@@ -399,35 +677,32 @@
       (system:wait-for-single-object (wait-list-%wait wait-list)
                                      "Waiting for socket activity" timeout))
     (update-ready-and-state-slots (wait-list-waiters wait-list)))
-
   
   (defun map-network-events (func network-events)
     (let ((event-map (fli:foreign-slot-value network-events 'network-events))
           (error-array (fli:foreign-slot-pointer network-events 'error-code)))
       (unless (zerop event-map)
-	  (dotimes (i fd-max-events)
-	    (unless (zerop (ldb (byte 1 i) event-map)) ;;### could be faster with ash and logand?
-	      (funcall func (fli:foreign-aref error-array i)))))))
+        (dotimes (i fd-max-events)
+          (unless (zerop (ldb (byte 1 i) event-map)) ;;### could be faster with ash and logand?
+            (funcall func (fli:foreign-aref error-array i)))))))
 
   (defun update-ready-and-state-slots (sockets)
-     (dolist (socket sockets)
-        (if (or (and (stream-usocket-p socket)
-                     (listen (socket-stream socket)))
-                (%ready-p socket))
-            (setf (state socket) :READ)
-          (multiple-value-bind
-                (rv network-events)
-                (wsa-enum-network-events (os-socket-handle socket) 0 t)
-             (if (zerop rv)
-                 (map-network-events #'(lambda (err-code)
-                                          (if (zerop err-code)
-                                             (setf (%ready-p socket) t
-                                                   (state socket) :READ)
-                                             (raise-usock-err err-code socket)))
-                                     network-events)
-                 (maybe-wsa-error rv socket))))))
-
-
+    (dolist (socket sockets)
+      (if (or (and (stream-usocket-p socket)
+                   (listen (socket-stream socket)))
+              (%ready-p socket))
+          (setf (state socket) :READ)
+        (multiple-value-bind
+            (rv network-events)
+            (wsa-enum-network-events (os-socket-handle socket) 0 t)
+          (if (zerop rv)
+              (map-network-events #'(lambda (err-code)
+                                      (if (zerop err-code)
+                                          (setf (%ready-p socket) t
+                                                (state socket) :READ)
+                                        (raise-usock-err err-code socket)))
+                                  network-events)
+            (maybe-wsa-error rv socket))))))
 
   ;; The wait-list part
 
@@ -436,7 +711,8 @@
       (unless (null (wait-list-%wait wl))
         (wsa-event-close (wait-list-%wait wl)))))
   
-  (hcl:add-special-free-action 'free-wait-list)
+  (eval-when (:load-toplevel :execute)
+    (hcl:add-special-free-action 'free-wait-list))
   
   (defun %setup-wait-list (wait-list)
     (hcl:flag-special-free-action wait-list)
@@ -445,7 +721,8 @@
   (defun %add-waiter (wait-list waiter)
     (let ((events (etypecase waiter
                     (stream-server-usocket (logior fd-connect fd-accept fd-close))
-                    (stream-usocket (logior fd-connect fd-read fd-oob fd-close)))))
+                    (stream-usocket (logior fd-connect fd-read fd-oob fd-close))
+                    (datagram-usocket (logior fd-read)))))
       (maybe-wsa-error
        (wsa-event-select (os-socket-handle waiter) (wait-list-%wait wait-list) events)
        waiter)))
@@ -455,4 +732,4 @@
      (wsa-event-select (os-socket-handle waiter) (wait-list-%wait wait-list) 0)
      waiter))
   
-  );; end of WIN32-block
+) ; end of WIN32-block

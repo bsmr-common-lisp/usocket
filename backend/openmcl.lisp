@@ -1,5 +1,5 @@
-;;;; $Id: openmcl.lisp 440 2008-10-21 12:27:45Z ehuelsmann $
-;;;; $URL: svn+ssh://ehuelsmann@common-lisp.net/project/usocket/svn/usocket/tags/0.4.1/backend/openmcl.lisp $
+;;;; $Id: openmcl.lisp 574 2011-02-02 06:51:56Z ctian $
+;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.0/backend/openmcl.lisp $
 
 ;;;; See LICENSE for licensing information.
 
@@ -25,6 +25,10 @@
     (:shutdown . shutdown-error)
     (:access-denied . operation-not-permitted-error)))
 
+(defparameter +openmcl-nameserver-error-map+
+  '((:no-recovery . ns-no-recovery-error)
+    (:try-again . ns-try-again-condition)
+    (:host-not-found . ns-host-not-found-error)))
 
 ;; we need something which the openmcl implementors 'forgot' to do:
 ;; wait for more than one socket-or-fd
@@ -62,33 +66,51 @@
        (raise-error-from-id (openmcl-socket:socket-error-identifier condition)
                             socket condition))
     (ccl:input-timeout
-       (error 'timeout-error :socket socket :real-error condition))
+       (error 'timeout-error :socket socket))
     (ccl:communication-deadline-expired
-       (error 'deadline-error :socket socket :real-error condition))
+       (error 'deadline-timeout-error :socket socket))
     (ccl::socket-creation-error #| ugh! |#
-       (raise-error-from-id (ccl::socket-creation-error-identifier condition)
-                            socket condition))))
+       (let* ((condition-id (ccl::socket-creation-error-identifier condition))
+	      (nameserver-error (cdr (assoc condition-id
+					    +openmcl-nameserver-error-map+))))
+	 (if nameserver-error
+	   (error nameserver-error :host-or-ip nil)
+	   (raise-error-from-id condition-id socket condition))))))
 
 (defun to-format (element-type)
   (if (subtypep element-type 'character)
       :text
     :binary))
 
-(defun socket-connect (host port &key (element-type 'character) timeout deadline nodelay
+(defun socket-connect (host port &key (protocol :stream) (element-type 'character)
+		       timeout deadline nodelay
                        local-host local-port)
   (with-mapped-conditions ()
-    (let ((mcl-sock
-           (openmcl-socket:make-socket :remote-host (host-to-hostname host)
-                                       :remote-port port
-                                       :local-host (when local-host (host-to-hostname local-host))
-                                       :local-port local-port
-                                       :format (to-format element-type)
-                                       :deadline deadline
-                                       :nodelay nodelay
-                                       :connect-timeout (and timeout
-                                                             (* timeout internal-time-units-per-second)))))
-      (openmcl-socket:socket-connect mcl-sock)
-      (make-stream-socket :stream mcl-sock :socket mcl-sock))))
+    (ecase protocol
+      (:stream
+       (let ((mcl-sock
+	      (openmcl-socket:make-socket :remote-host (host-to-hostname host)
+					  :remote-port port
+					  :local-host (when local-host (host-to-hostname local-host))
+					  :local-port local-port
+					  :format (to-format element-type)
+					  :deadline deadline
+					  :nodelay nodelay
+					  :connect-timeout timeout)))
+	 (openmcl-socket:socket-connect mcl-sock)
+	 (make-stream-socket :stream mcl-sock :socket mcl-sock)))
+      (:datagram
+       (let ((mcl-sock
+	      (openmcl-socket:make-socket :address-family :internet
+					  :type :datagram
+					  :local-host (when local-host (host-to-hostname local-host))
+					  :local-port local-port
+					  :format :binary)))
+	 (when (and host port)
+	   (ccl::inet-connect (ccl::socket-device mcl-sock)
+			      (ccl::host-as-inet-host host)
+			      (ccl::port-as-inet-port port "udp")))
+	 (make-datagram-socket mcl-sock))))))
 
 (defun socket-listen (host port
                            &key reuseaddress
@@ -96,6 +118,7 @@
                            (backlog 5)
                            (element-type 'character))
   (let* ((reuseaddress (if reuse-address-supplied-p reuse-address reuseaddress))
+	 (real-host (host-to-hostname host))
          (sock (with-mapped-conditions ()
                   (apply #'openmcl-socket:make-socket
                          (append (list :connect :passive
@@ -104,7 +127,7 @@
                                        :backlog backlog
                                        :format (to-format element-type))
                                  (when (ip/= host *wildcard-host*)
-                                   (list :local-host host)))))))
+                                   (list :local-host real-host)))))))
     (make-stream-server-socket sock :element-type element-type)))
 
 (defmethod socket-accept ((usocket stream-server-usocket) &key element-type)
@@ -122,11 +145,28 @@
   (with-mapped-conditions (usocket)
     (close (socket usocket))))
 
+(defmethod socket-send ((usocket datagram-usocket) buffer length &key host port)
+  (with-mapped-conditions (usocket)
+    (if (and host port)
+	(openmcl-socket:send-to (socket usocket) buffer length
+				:remote-host (host-to-hbo host)
+				:remote-port port)
+	;; following functino was defined in "vendor/ccl-send.lisp"
+	(ccl::send-for-usocket (socket usocket) buffer length))))
+
+(defmethod socket-receive ((usocket datagram-usocket) buffer length &key)
+  (with-mapped-conditions (usocket)
+    (openmcl-socket:receive-from (socket usocket) length :buffer buffer)))
+
 (defmethod get-local-address ((usocket usocket))
-  (hbo-to-vector-quad (openmcl-socket:local-host (socket usocket))))
+  (let ((address (openmcl-socket:local-host (socket usocket))))
+    (when address
+      (hbo-to-vector-quad address))))
 
 (defmethod get-peer-address ((usocket stream-usocket))
-  (hbo-to-vector-quad (openmcl-socket:remote-host (socket usocket))))
+  (let ((address (openmcl-socket:remote-host (socket usocket))))
+    (when address
+      (hbo-to-vector-quad address))))
 
 (defmethod get-local-port ((usocket usocket))
   (openmcl-socket:local-port (socket usocket)))
@@ -151,7 +191,6 @@
      (list (hbo-to-vector-quad (openmcl-socket:lookup-hostname
                                 (host-to-hostname name))))))
 
-
 (defun %setup-wait-list (wait-list)
   (declare (ignore wait-list)))
 
@@ -166,7 +205,5 @@
     (let* ((ticks-timeout (truncate (* (or timeout 1)
                                        ccl::*ticks-per-second*))))
       (input-available-p (wait-list-waiters wait-list)
-                               (when timeout ticks-timeout))
+			 (when timeout ticks-timeout))
       wait-list)))
-
-

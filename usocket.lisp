@@ -1,5 +1,5 @@
-;;;; $Id: usocket.lisp 452 2008-10-22 07:18:07Z ctian $
-;;;; $URL: svn+ssh://ehuelsmann@common-lisp.net/project/usocket/svn/usocket/tags/0.4.1/usocket.lisp $
+;;;; $Id: usocket.lisp 570 2010-12-08 04:43:05Z ctian $
+;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.0/usocket.lisp $
 
 ;;;; See LICENSE for licensing information.
 
@@ -10,6 +10,19 @@
 
 (defparameter *auto-port* 0
   "Port number to pass when an auto-assigned port number is wanted.")
+
+(defconstant +max-datagram-packet-size+ 65507
+  "The theoretical maximum amount of data in a UDP datagram.
+
+The IPv4 UDP packets have a 16-bit length constraint, and IP+UDP header has 28-byte.
+
+IP_MAXPACKET = 65535,       /* netinet/ip.h */
+sizeof(struct ip) = 20,     /* netinet/ip.h */
+sizeof(struct udphdr) = 8,  /* netinet/udp.h */
+
+65535 - 20 - 8 = 65507
+
+(But for UDP broadcast, the maximum message size is limited by the MTU size of the underlying link)")
 
 (defclass usocket ()
   ((socket
@@ -33,7 +46,7 @@ The value stored in this slot can be any of
 
 The last two remain unused in the current version.
 ")
-   #+(and lispworks win32)
+   #+(and win32 (or sbcl ecl lispworks))
    (%ready-p
     :initform nil
     :accessor %ready-p
@@ -82,6 +95,24 @@ with the `socket-close' method or by closing the associated stream
   (:documentation "Socket which listens for stream connections to
 be initiated from remote sockets."))
 
+(defclass datagram-usocket (usocket)
+  ((connected-p :type boolean
+                :accessor connected-p
+                :initarg :connected-p)
+   #+(or cmu scl lispworks)
+   (%open-p     :type boolean
+                :accessor %open-p
+                :initform t
+		:documentation "Flag to indicate if usocket is open,
+for GC on implementions operate on raw socket fd.")
+   #+lispworks
+   (recv-buffer
+    :documentation "Private RECV buffer.")
+   #+lispworks
+   (send-buffer
+    :documentation "Private SEND buffer."))
+  (:documentation "UDP (inet-datagram) socket"))
+
 (defun usocket-p (socket)
   (typep socket 'usocket))
 
@@ -90,6 +121,9 @@ be initiated from remote sockets."))
 
 (defun stream-server-usocket-p (socket)
   (typep socket 'stream-server-usocket))
+
+(defun datagram-usocket-p (socket)
+  (typep socket 'datagram-usocket))
 
 (defun make-socket (&key socket)
   "Create a usocket socket type from implementation specific socket."
@@ -126,6 +160,13 @@ The returned value is a subtype of `stream-server-usocket'.
                  :socket socket
                  :element-type element-type))
 
+(defun make-datagram-socket (socket &key connected-p)
+  (unless socket
+    (error 'invalid-socket-error))
+  (make-instance 'datagram-usocket
+                 :socket socket
+                 :connected-p connected-p))
+
 (defgeneric socket-accept (socket &key element-type)
   (:documentation
       "Accepts a connection from `socket', returning a `stream-socket'.
@@ -135,6 +176,14 @@ explicitly specified, or the element-type passed to `socket-listen' otherwise.")
 
 (defgeneric socket-close (usocket)
   (:documentation "Close a previously opened `usocket'."))
+
+(defgeneric socket-send (usocket buffer length &key host port)
+  (:documentation "Send packets through a previously opend `usocket'."))
+
+(defgeneric socket-receive (usocket buffer length &key)
+  (:documentation "Receive packets from a previously opend `usocket'.
+
+Returns 4 values: (values buffer size host port)"))
 
 (defgeneric get-local-address (socket)
   (:documentation "Returns the IP address of the socket."))
@@ -183,10 +232,10 @@ The `body' is an implied progn form."
 the arguments `socket-connect-args' to `socket-var' and if `stream-var' is
 non-nil, bind the associated socket stream to it."
   `(with-connected-socket (,socket-var (socket-connect ,@socket-connect-args))
-       ,(if (null stream-var)
-           `(progn ,@body)
-          `(let ((,stream-var (socket-stream ,socket-var)))
-             ,@body))))
+     ,(if (null stream-var)
+          `(progn ,@body)
+           `(let ((,stream-var (socket-stream ,socket-var)))
+              ,@body))))
 
 (defmacro with-server-socket ((var server-socket) &body body)
   "Bind `server-socket' to `var', ensuring socket destruction on exit.
@@ -195,21 +244,19 @@ non-nil, bind the associated socket stream to it."
 
 The `body' is an implied progn form."
   `(with-connected-socket (,var ,server-socket)
-      ,@body))
+     ,@body))
 
 (defmacro with-socket-listener ((socket-var &rest socket-listen-args)
                                 &body body)
   "Bind the socket resulting from a call to `socket-listen' with arguments
 `socket-listen-args' to `socket-var'."
   `(with-server-socket (,socket-var (socket-listen ,@socket-listen-args))
-      ,@body))
-
+     ,@body))
 
 (defstruct (wait-list (:constructor %make-wait-list))
   %wait     ;; implementation specific
   waiters ;; the list of all usockets
-  map  ;; maps implementation sockets to usockets
-  )
+  map)  ;; maps implementation sockets to usockets
 
 ;; Implementation specific:
 ;;
@@ -221,9 +268,8 @@ The `body' is an implied progn form."
   (let ((wl (%make-wait-list)))
     (setf (wait-list-map wl) (make-hash-table))
     (%setup-wait-list wl)
-    (dolist (x waiters)
-      (add-waiter wl x))
-    wl))
+    (dolist (x waiters wl)
+      (add-waiter wl x))))
 
 (defun add-waiter (wait-list input)
   (setf (gethash (socket input) (wait-list-map wait-list)) input
@@ -244,7 +290,6 @@ The `body' is an implied progn form."
   (setf (wait-list-waiters wait-list) nil)
   (clrhash (wait-list-map wait-list)))
 
-
 (defun wait-for-input (socket-or-sockets &key timeout ready-only)
   "Waits for one or more streams to become ready for reading from
 the socket.  When `timeout' (a non-negative real number) is
@@ -256,7 +301,16 @@ are readable (or in case of server streams acceptable).  NIL may
 be returned for this value either when waiting timed out or when
 it was interrupted (EINTR).  The second value is a real number
 indicating the time remaining within the timeout period or NIL if
-none."
+none.
+
+Without the READY-ONLY arg, WAIT-FOR-INPUT will return all sockets in
+the original list you passed it. This prevents a new list from being
+consed up. Some users of USOCKET were reluctant to use it if it
+wouldn't behave that way, expecting it to cost significant performance
+to do the associated garbage collection.
+
+Without the READY-ONLY arg, you need to check the socket STATE slot for
+the values documented in usocket.lisp in the usocket class."
   (unless (wait-list-p socket-or-sockets)
     (let ((wl (make-wait-list (if (listp socket-or-sockets)
                                   socket-or-sockets (list socket-or-sockets)))))
@@ -267,16 +321,17 @@ none."
           (values (if ready-only socks socket-or-sockets) to)))))
   (let* ((start (get-internal-real-time))
          (sockets-ready 0))
+    #-(and win32 (or sbcl ecl))
     (dolist (x (wait-list-waiters socket-or-sockets))
       (when (setf (state x)
                   (if (and (stream-usocket-p x)
                            (listen (socket-stream x)))
                       :READ NIL))
         (incf sockets-ready)))
-         ;; the internal routine is responsibe for
-         ;; making sure the wait doesn't block on socket-streams of
-         ;; which theready- socket isn't ready, but there's space left in the
-         ;; buffer
+    ;; the internal routine is responsibe for
+    ;; making sure the wait doesn't block on socket-streams of
+    ;; which theready- socket isn't ready, but there's space left in the
+    ;; buffer
     (wait-for-input-internal socket-or-sockets
                              :timeout (if (zerop sockets-ready) timeout 0))
     (let ((to-result (when timeout
@@ -311,7 +366,6 @@ none."
       (setf (ldb (byte 8 i) integer)
             (aref buffer b)))))
 
-
 (defmacro port-to-octet-buffer (port buffer &key (start 0))
   `(integer-to-octet-buffer ,port ,buffer 2 ,start))
 
@@ -335,6 +389,13 @@ parse-integer) on each of the string elements."
     (dolist (element (reverse list))
       (push (parse-integer element) new-list))
     new-list))
+
+(defun ip-address-string-p (string)
+  "Return a true value if the given string could be an IP address."
+  (every (lambda (char)
+           (or (digit-char-p char)
+               (eql char #\.)))
+         string))
 
 (defun hbo-to-dotted-quad (integer)
   "Host-byte-order integer to dotted-quad string conversion utility."
@@ -360,14 +421,14 @@ parse-integer) on each of the string elements."
           (aref vector 3)))
 
 (defun dotted-quad-to-vector-quad (string)
-  (let ((list (list-of-strings-to-integers (split-sequence:split-sequence #\. string))))
+  (let ((list (list-of-strings-to-integers (split-sequence #\. string))))
     (vector (first list) (second list) (third list) (fourth list))))
 
 (defgeneric host-byte-order (address))
 (defmethod host-byte-order ((string string))
   "Convert a string, such as 192.168.1.1, to host-byte-order,
 such as 3232235777."
-  (let ((list (list-of-strings-to-integers (split-sequence:split-sequence #\. string))))
+  (let ((list (list-of-strings-to-integers (split-sequence #\. string))))
     (+ (* (first list) 256 256 256) (* (second list) 256 256)
        (* (third list) 256) (fourth list))))
 
@@ -387,7 +448,8 @@ such as 3232235777."
     ((or (vector t 4)
          (array (unsigned-byte 8) (4)))
      (vector-quad-to-dotted-quad host))
-    (integer (hbo-to-dotted-quad host))))
+    (integer (hbo-to-dotted-quad host))
+    (null "0.0.0.0")))
 
 (defun ip= (ip1 ip2)
   (etypecase ip1
@@ -408,7 +470,7 @@ such as 3232235777."
 ;; DNS helper functions
 ;;
 
-#-(or clisp armedbear)
+#-clisp
 (progn
   (defun get-host-by-name (name)
     (let ((hosts (get-hosts-by-name name)))
@@ -423,7 +485,7 @@ such as 3232235777."
     "Translate a host specification (vector quad, dotted quad or domain name)
 to a vector quad."
     (etypecase host
-      (string (let* ((ip (ignore-errors
+      (string (let* ((ip (when (ip-address-string-p host)
                            (dotted-quad-to-vector-quad host))))
                 (if (and ip (= 4 (length ip)))
                     ;; valid IP dotted quad?
@@ -436,7 +498,7 @@ to a vector quad."
 
   (defun host-to-hbo (host)
     (etypecase host
-      (string (let ((ip (ignore-errors
+      (string (let ((ip (when (ip-address-string-p host)
                           (dotted-quad-to-vector-quad host))))
                 (if (and ip (= 4 (length ip)))
                     (host-byte-order ip)
@@ -458,9 +520,6 @@ Optionally, a different fractional part can be specified."
       (truncate timeout 1)
     (values secs
             (truncate (* fractional sec-frac) 1))))
-
-
-
 
 ;;
 ;; Setting of documentation for backend defined functions

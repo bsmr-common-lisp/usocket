@@ -1,15 +1,19 @@
-;;;; $Id: package.lisp 452 2008-10-22 07:18:07Z ctian $
-;;;; $URL: svn+ssh://ehuelsmann@common-lisp.net/project/usocket/svn/usocket/tags/0.4.1/package.lisp $
+;;;; $Id: package.lisp 567 2010-09-30 08:45:35Z ctian $
+;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.0/package.lisp $
 
 ;;;; See the LICENSE file for licensing information.
 
-#+lispworks (cl:require "comm")
+(in-package :usocket-system)
 
-(cl:eval-when (:execute :load-toplevel :compile-toplevel)
-  (cl:defpackage :usocket
-      (:use :cl)
-    (:export #:*wildcard-host*
+(defpackage :usocket
+  (:use :common-lisp #+abcl :java)
+  (:export   #:*wildcard-host*
              #:*auto-port*
+
+             #:*remote-host* ; special variables (udp)
+             #:*remote-port*
+
+             #:+max-datagram-packet-size+
 
              #:socket-connect ; socket constructors and methods
              #:socket-listen
@@ -21,6 +25,10 @@
              #:get-peer-port
              #:get-local-name
              #:get-peer-name
+
+             #:socket-send    ; udp function (send)
+             #:socket-receive ; udp function (receive)
+             #:socket-server  ; udp server
 
              #:wait-for-input ; waiting for input-ready state (select() like)
              #:make-wait-list
@@ -38,6 +46,7 @@
              #:stream-server-usocket
              #:socket
              #:socket-stream
+             #:datagram-usocket
 
              #:host-byte-order ; IP(v4) utility functions
              #:hbo-to-dotted-quad
@@ -64,9 +73,23 @@
              #:ns-unknown-condition
              #:unknown-error
              #:ns-unknown-error
+             #:socket-warning ; warnings (udp)
 
              #:insufficient-implementation ; conditions regarding usocket support level
              #:unsupported
-             #:unimplemented
-             )))
+             #:unimplemented))
 
+(in-package :usocket)
+
+;;; Logical Pathname Translations, learn from CL-HTTP source code
+(eval-when (:load-toplevel :execute)
+  (let* ((defaults #+asdf (asdf:component-pathname (asdf:find-system :usocket))
+                   #-asdf *load-truename*)
+         (home (make-pathname :name :wild :type :wild
+                              :directory (append (pathname-directory defaults)
+                                                 '(:wild-inferiors))
+                              :host (pathname-host defaults)
+                              :defaults defaults
+			      :version :newest)))
+    (setf (logical-pathname-translations "usocket")
+          `(("**;*.*" ,home)))))

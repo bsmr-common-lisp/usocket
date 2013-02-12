@@ -1,43 +1,43 @@
-
-;;;; $Id: usocket.asd 486 2008-12-27 21:53:50Z ehuelsmann $
-;;;; $URL: svn+ssh://ehuelsmann@common-lisp.net/project/usocket/svn/usocket/tags/0.4.1/usocket.asd $
+;;;; -*- Mode: Lisp -*-
+;;;; $Id: usocket.asd 555 2010-09-13 15:33:20Z ctian $
+;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.0/usocket.asd $
 
 ;;;; See the LICENSE file for licensing information.
 
-(in-package #:cl-user)
+(in-package :cl-user)
 
-(defpackage #:usocket-system
-    (:use #:cl #:asdf))
+(defpackage usocket-system
+    (:use :cl :asdf))
 
-(in-package #:usocket-system)
+(in-package :usocket-system)
 
 (defsystem usocket
     :name "usocket"
     :author "Erik Enge & Erik Huelsmann"
-    :version "0.4.1"
+    :version "0.5.0"
     :licence "MIT"
     :description "Universal socket library for Common Lisp"
-    :depends-on (:split-sequence
-                 #+sbcl :sb-bsd-sockets)
+    :depends-on (#+sbcl :sb-bsd-sockets)
     :components ((:file "package")
-                 (:file "usocket"
-                        :depends-on ("package"))
-                 (:file "condition"
-                        :depends-on ("usocket"))
-                 #+clisp (:file "clisp" :pathname "backend/clisp"
-                                :depends-on ("condition"))
-                 #+cmu (:file "cmucl" :pathname "backend/cmucl"
-                              :depends-on ("condition"))
-                 #+scl (:file "scl" :pathname "backend/scl"
-                              :depends-on ("condition"))
-                 #+(or sbcl ecl) (:file "sbcl" :pathname "backend/sbcl"
-                                        :depends-on ("condition"))
-                 #+lispworks (:file "lispworks" :pathname "backend/lispworks"
-                                    :depends-on ("condition"))
-                 #+openmcl (:file "openmcl" :pathname "backend/openmcl"
-                                  :depends-on ("condition"))
-                 #+allegro (:file "allegro" :pathname "backend/allegro"
-                                  :depends-on ("condition"))
-                 #+armedbear (:file "armedbear" :pathname "backend/armedbear"
-                                                :depends-on ("condition"))
-                 ))
+		 (:module "vendor" :depends-on ("package")
+		  :components ((:file "split-sequence")
+			       #+mcl (:file "kqueue")
+			       #+openmcl (:file "ccl-send")
+                               (:file "spawn-thread")))
+                 (:file "usocket" :depends-on ("vendor"))
+                 (:file "condition" :depends-on ("usocket"))
+		 (:module "backend" :depends-on ("condition")
+		  :components (#+abcl		(:file "abcl")
+			       #+clisp		(:file "clisp")
+			       #+cmu		(:file "cmucl")
+			       #+scl		(:file "scl")
+			       #+(or sbcl ecl)	(:file "sbcl")
+			       #+lispworks	(:file "lispworks")
+			       #+mcl		(:file "mcl")
+			       #+openmcl	(:file "openmcl")
+			       #+allegro	(:file "allegro")))
+		 (:file "server" :depends-on ("backend"))))
+
+(defmethod perform ((op test-op) (c (eql (find-system :usocket))))
+  (oos 'load-op :usocket-test)
+  (oos 'test-op :usocket-test))

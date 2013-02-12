@@ -1,5 +1,5 @@
-;;;; $Id: sbcl.lisp 485 2008-12-26 14:31:49Z ctian $
-;;;; $URL: svn+ssh://ehuelsmann@common-lisp.net/project/usocket/svn/usocket/tags/0.4.1/backend/sbcl.lisp $
+;;;; $Id: sbcl.lisp 575 2011-03-10 10:17:43Z ctian $
+;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.0/backend/sbcl.lisp $
 
 ;;;; See LICENSE for licensing information.
 
@@ -34,10 +34,8 @@
          (when (= result 0)
            (sb-alien:cast buf sb-alien:c-string))))))
 
-
 #+ecl
 (progn
-
   #-:wsock
   (ffi:clines
    "#include <errno.h>"
@@ -50,7 +48,8 @@
    "#include <winsock2.h>")
 
   (ffi:clines
-   "#include <sys/time.h>"
+   #+:msvc "#include <time.h>"
+   #-:msvc "#include <sys/time.h>"
    "#include <ecl/ecl-inl.h>")
 
   #+:prefixed-api
@@ -68,7 +67,7 @@
 
   (defun fdset-alloc ()
     (ffi:c-inline () () :pointer-void
-     "cl_alloc_atomic(sizeof(fd_set))" :one-liner t))
+     "ecl_alloc_atomic(sizeof(fd_set))" :one-liner t))
 
   (defun fdset-zero (fdset)
     (ffi:c-inline (fdset) (:pointer-void) :void
@@ -96,7 +95,7 @@
   (defun get-host-name ()
     (ffi:c-inline
      () () :object
-     "{ char *buf = cl_alloc_atomic(257);
+     "{ char *buf = ecl_alloc_atomic(257);
 
         if (gethostname(buf,256) == 0)
           @(return) = make_simple_base_string(buf);
@@ -144,9 +143,7 @@
              (when (fdset-fd-isset rfds (sb-bsd-sockets:socket-file-descriptor
                                          (socket sock)))
                (setf (state sock) :READ))))))))
-
-
-)
+) ; progn
 
 (defun map-socket-error (sock-err)
   (map-errno-error (sb-bsd-sockets::socket-error-errno sock-err)))
@@ -174,6 +171,8 @@
      . socket-type-not-supported-error)
     (sb-bsd-sockets:network-unreachable-error . network-unreachable-error)
     (sb-bsd-sockets:operation-timeout-error . timeout-error)
+    #-ecl
+    (sb-sys:io-timeout . timeout-error)
     (sb-bsd-sockets:socket-error . ,#'map-socket-error)
 
     ;; Nameservice errors: mapped to unknown-error
@@ -200,14 +199,19 @@
                  (if usock-cond
                      (signal usock-cond :socket socket))))))
 
+(defvar *dummy-stream*
+  (let ((stream (make-broadcast-stream)))
+    (close stream)
+    stream))
 
-(defun socket-connect (host port &key (element-type 'character)
+(defun socket-connect (host port &key (protocol :stream) (element-type 'character)
                        timeout deadline (nodelay t nodelay-specified)
                        local-host local-port
 		       &aux
 		       (sockopt-tcp-nodelay-p
 			(fboundp 'sb-bsd-sockets::sockopt-tcp-nodelay)))
   (when deadline (unsupported 'deadline 'socket-connect))
+  #+ecl
   (when timeout (unsupported 'timeout 'socket-connect))
   (when (and nodelay-specified
              ;; 20080802: ECL added this function to its sockets
@@ -218,33 +222,55 @@
     (unsupported 'nodelay 'socket-connect))
 
   (let ((socket (make-instance 'sb-bsd-sockets:inet-socket
-                               :type :stream :protocol :tcp)))
-    (handler-case
-        (let* ((stream
-                (sb-bsd-sockets:socket-make-stream socket
-                                                   :input t
-                                                   :output t
-                                                   :buffering :full
-                                                   :element-type element-type))
-               ;;###FIXME: The above line probably needs an :external-format
-               (usocket (make-stream-socket :stream stream :socket socket))
-               (ip (host-to-vector-quad host)))
-	  ;; binghe: use SOCKOPT-TCP-NODELAY as internal symbol
-	  ;;         to pass compilation on ECL without it.
-          (when (and nodelay-specified sockopt-tcp-nodelay-p)
-            (setf (sb-bsd-sockets::sockopt-tcp-nodelay socket) nodelay))
-          (when (or local-host local-port)
-            (sb-bsd-sockets:socket-bind socket
-                                        (host-to-vector-quad
-                                         (or local-host *wildcard-host*))
-                                        (or local-port *auto-port*)))
-          (with-mapped-conditions (usocket)
-            (sb-bsd-sockets:socket-connect socket ip port))
-          usocket)
-      (t (c)
-        ;; Make sure we don't leak filedescriptors
-        (sb-bsd-sockets:socket-close socket)
-        (error c)))))
+                               :type protocol
+                               :protocol (case protocol
+                                           (:stream :tcp)
+                                           (:datagram :udp))))
+        (ip (host-to-vector-quad host))
+        (local-host (host-to-vector-quad (or local-host *wildcard-host*)))
+        (local-port (or local-port *auto-port*))
+        usocket ok)
+    (unwind-protect
+         (progn
+           (ecase protocol
+             (:stream
+              ;; If make a real socket stream before the socket is
+              ;; connected, it gets a misleading name so supply a
+              ;; dummy value to start with.
+              (setf usocket (make-stream-socket :socket socket :stream *dummy-stream*))
+              ;; binghe: use SOCKOPT-TCP-NODELAY as internal symbol
+              ;;         to pass compilation on ECL without it.
+              (when (and nodelay-specified sockopt-tcp-nodelay-p)
+                (setf (sb-bsd-sockets::sockopt-tcp-nodelay socket) nodelay))
+              (when (or local-host local-port)
+                (sb-bsd-sockets:socket-bind socket local-host local-port))
+              (with-mapped-conditions (usocket)
+                (sb-bsd-sockets:socket-connect socket ip port)
+                ;; Now that we're connected make the stream.
+                (setf (socket-stream usocket)
+                      (sb-bsd-sockets:socket-make-stream socket
+                                                         :input t
+                                                         :output t
+                                                         :buffering :full
+                                                         #+sbcl #+sbcl
+                                                         :timeout timeout
+                                                         :element-type element-type))))
+             (:datagram
+              (when (or local-host local-port)
+                (sb-bsd-sockets:socket-bind socket
+                                            (host-to-vector-quad
+                                             (or local-host *wildcard-host*))
+                                            (or local-port *auto-port*)))
+              (setf usocket (make-datagram-socket socket))
+              (when (and host port)
+                (with-mapped-conditions (usocket)
+                  (sb-bsd-sockets:socket-connect socket ip port)
+                  (setf (connected-p usocket) t)))))
+           (setf ok t))
+      ;; Clean up in case of an error.
+      (unless ok
+        (sb-bsd-sockets:socket-close socket :abort t)))
+    usocket))
 
 (defun socket-listen (host port
                            &key reuseaddress
@@ -292,6 +318,18 @@
   (with-mapped-conditions (usocket)
     (close (socket-stream usocket))))
 
+(defmethod socket-send ((socket datagram-usocket) buffer length &key host port)
+  (with-mapped-conditions (socket)
+    (let* ((s (socket socket))
+           (dest (if (and host port) (list (host-to-vector-quad host) port) nil)))
+      (sb-bsd-sockets:socket-send s buffer length :address dest))))
+
+(defmethod socket-receive ((socket datagram-usocket) buffer length
+			   &key (element-type '(unsigned-byte 8)))
+  (with-mapped-conditions (socket)
+    (let ((s (socket socket)))
+      (sb-bsd-sockets:socket-receive s buffer length :element-type element-type))))
+
 (defmethod get-local-name ((usocket usocket))
   (sb-bsd-sockets:socket-name (socket usocket)))
 
@@ -310,7 +348,6 @@
 (defmethod get-peer-port ((usocket stream-usocket))
   (nth-value 1 (get-peer-name usocket)))
 
-
 (defun get-host-by-address (address)
   (with-mapped-conditions ()
     (sb-bsd-sockets::host-ent-name
@@ -323,18 +360,15 @@
 
 #+(and sbcl (not win32))
 (progn
+  (defun %setup-wait-list (wait-list)
+    (declare (ignore wait-list)))
 
-(defun %setup-wait-list (wait-list)
-  (declare (ignore wait-list)))
+  (defun %add-waiter (wait-list waiter)
+    (push (socket waiter) (wait-list-%wait wait-list)))
 
-(defun %add-waiter (wait-list waiter)
-  (push (socket waiter) (wait-list-%wait wait-list)))
-
-(defun %remove-waiter (wait-list waiter)
-  (setf (wait-list-%wait wait-list)
-        (remove (socket waiter) (wait-list-%wait wait-list))))
-
-
+  (defun %remove-waiter (wait-list waiter)
+    (setf (wait-list-%wait wait-list)
+          (remove (socket waiter) (wait-list-%wait wait-list))))
 
   (defun wait-for-input-internal (sockets &key timeout)
     (with-mapped-conditions ()
@@ -367,10 +401,186 @@
                        (setf (state x) :READ))))))))))
 ) ; progn
 
-#+(and sbcl win32)
-  (warn "wait-for-input not (yet!) supported...")
+;;; WAIT-FOR-INPUT support for SBCL on Windows platform (Chun Tian (binghe))
+;;; Based on LispWorks version written by Erik Huelsmann.
 
-#+ecl
+#+win32 ; shared by ECL and SBCL
+(progn
+  (defconstant +wsa-wait-failed+ #xffffffff)
+  (defconstant +wsa-wait-event-0+ 0)
+  (defconstant +wsa-wait-timeout+ 258)
+
+  (defconstant fd-read 1)
+  (defconstant fd-read-bit 0)
+  (defconstant fd-write 2)
+  (defconstant fd-write-bit 1)
+  (defconstant fd-oob 4)
+  (defconstant fd-oob-bit 2)
+  (defconstant fd-accept 8)
+  (defconstant fd-accept-bit 3)
+  (defconstant fd-connect 16)
+  (defconstant fd-connect-bit 4)
+  (defconstant fd-close 32)
+  (defconstant fd-close-bit 5)
+  (defconstant fd-qos 64)
+  (defconstant fd-qos-bit 6)
+  (defconstant fd-group-qos 128)
+  (defconstant fd-group-qos-bit 7)
+  (defconstant fd-routing-interface 256)
+  (defconstant fd-routing-interface-bit 8)
+  (defconstant fd-address-list-change 512)
+  (defconstant fd-address-list-change-bit 9)
+  (defconstant fd-max-events 10)
+  (defconstant fionread 1074030207)
+
+  ;; Note: for ECL, socket-handle will return raw Windows Handle,
+  ;;       while SBCL returns OSF Handle instead.
+  (defun socket-handle (usocket)
+    (sb-bsd-sockets:socket-file-descriptor (socket usocket)))
+
+  (defun socket-ready-p (socket)
+    (if (typep socket 'stream-usocket)
+        (plusp (bytes-available-for-read socket))
+      (%ready-p socket)))
+
+  (defun waiting-required (sockets)
+    (notany #'socket-ready-p sockets))
+) ; progn
+
+#+(and sbcl win32)
+(progn
+  (sb-alien:define-alien-type ws-socket sb-alien:unsigned-int)
+  (sb-alien:define-alien-type ws-dword sb-alien:unsigned-long)
+  (sb-alien:define-alien-type ws-event sb-alien::hinstance)
+
+  (sb-alien:define-alien-type nil
+    (sb-alien:struct wsa-network-events
+      (network-events sb-alien:long)
+      (error-code (array sb-alien:int 10)))) ; 10 = fd-max-events
+
+  (sb-alien:define-alien-routine ("WSACreateEvent" wsa-event-create)
+      ws-event) ; return type only
+
+  (sb-alien:define-alien-routine ("WSAResetEvent" wsa-event-reset)
+      (boolean #.sb-vm::n-machine-word-bits)
+    (event-object ws-event))
+
+  (sb-alien:define-alien-routine ("WSACloseEvent" wsa-event-close)
+      (boolean #.sb-vm::n-machine-word-bits)
+    (event-object ws-event))
+
+  (sb-alien:define-alien-routine ("WSAEnumNetworkEvents" wsa-enum-network-events)
+      sb-alien:int
+    (socket ws-socket)
+    (event-object ws-event)
+    (network-events (* (sb-alien:struct wsa-network-events))))
+
+  (sb-alien:define-alien-routine ("WSAEventSelect" wsa-event-select)
+      sb-alien:int
+    (socket ws-socket)
+    (event-object ws-event)
+    (network-events sb-alien:long))
+
+  (sb-alien:define-alien-routine ("WSAWaitForMultipleEvents" wsa-wait-for-multiple-events)
+      ws-dword
+    (number-of-events ws-dword)
+    (events (* ws-event))
+    (wait-all-p (boolean #.sb-vm::n-machine-word-bits))
+    (timeout ws-dword)
+    (alertable-p (boolean #.sb-vm::n-machine-word-bits)))
+
+  (sb-alien:define-alien-routine ("ioctlsocket" wsa-ioctlsocket)
+      sb-alien:int
+    (socket ws-socket)
+    (cmd sb-alien:long)
+    (argp (* sb-alien:unsigned-long)))
+
+  (defun raise-usock-err (errno socket)
+    (error 'unknown-error
+           :socket socket
+           :real-error errno))
+
+  (defun maybe-wsa-error (rv &optional socket)
+    (unless (zerop rv)
+      (raise-usock-err (sockint::wsa-get-last-error) socket)))
+
+  (defun os-socket-handle (usocket)
+    (sockint::fd->handle (sb-bsd-sockets:socket-file-descriptor (socket usocket))))
+
+  (defun bytes-available-for-read (socket)
+    (sb-alien:with-alien ((int-ptr sb-alien:unsigned-long))
+      (maybe-wsa-error (wsa-ioctlsocket (os-socket-handle socket) fionread (sb-alien:addr int-ptr))
+                       socket)
+      int-ptr))
+
+  (defun wait-for-input-internal (wait-list &key timeout)
+    (when (waiting-required (wait-list-waiters wait-list))
+      (let ((rv (wsa-wait-for-multiple-events 1 (wait-list-%wait wait-list)
+                                              nil (truncate (* 1000 timeout)) nil)))
+        (ecase rv
+          ((#.+wsa-wait-event-0+ #.+wsa-wait-timeout+)
+           (update-ready-and-state-slots (wait-list-waiters wait-list)))
+          ((#.+wsa-wait-failed+)
+           (raise-usock-err
+            (sb-win32::get-last-error-message (sb-win32::get-last-error))
+            wait-list))))))
+
+  (defun map-network-events (func network-events)
+    (let ((event-map (sb-alien:slot network-events 'network-events))
+          (error-array (sb-alien:slot network-events 'error-code)))
+      (unless (zerop event-map)
+        (dotimes (i fd-max-events)
+          (unless (zerop (ldb (byte 1 i) event-map)) ;;### could be faster with ash and logand?
+            (funcall func (sb-alien:deref error-array i)))))))
+
+  (defun update-ready-and-state-slots (sockets)
+    (dolist (socket sockets)
+      (if (or (and (stream-usocket-p socket)
+                   (listen (socket-stream socket)))
+              (%ready-p socket))
+          (setf (state socket) :READ)
+        (sb-alien:with-alien ((network-events (sb-alien:struct wsa-network-events)))
+          (let ((rv (wsa-enum-network-events (os-socket-handle socket) 0
+                                             (sb-alien:addr network-events))))
+            (if (zerop rv)
+                (map-network-events #'(lambda (err-code)
+                                        (if (zerop err-code)
+                                            (setf (%ready-p socket) t
+                                                  (state socket) :READ)
+                                          (raise-usock-err err-code socket)))
+                                    network-events)
+              (maybe-wsa-error rv socket)))))))
+
+  (defun os-wait-list-%wait (wait-list)
+    (sb-alien:deref (wait-list-%wait wait-list)))
+
+  (defun (setf os-wait-list-%wait) (value wait-list)
+    (setf (sb-alien:deref (wait-list-%wait wait-list)) value))
+
+  (defun %setup-wait-list (wait-list)
+    (setf (wait-list-%wait wait-list) (sb-alien:make-alien ws-event))
+    (setf (os-wait-list-%wait wait-list) (wsa-event-create))
+    (sb-ext:finalize wait-list
+                     #'(lambda () (unless (null (wait-list-%wait wait-list))
+                                    (wsa-event-close (os-wait-list-%wait wait-list))
+                                    (sb-alien:free-alien (wait-list-%wait wait-list))))))
+
+  (defun %add-waiter (wait-list waiter)
+    (let ((events (etypecase waiter
+                    (stream-server-usocket (logior fd-connect fd-accept fd-close))
+                    (stream-usocket (logior fd-read))
+                    (datagram-usocket (logior fd-read)))))
+      (maybe-wsa-error
+       (wsa-event-select (os-socket-handle waiter) (os-wait-list-%wait wait-list) events)
+       waiter)))
+
+  (defun %remove-waiter (wait-list waiter)
+    (maybe-wsa-error
+     (wsa-event-select (os-socket-handle waiter) (os-wait-list-%wait wait-list) 0)
+     waiter))
+) ; progn
+
+#+(and ecl (not win32))
 (progn
   (defun wait-for-input-internal (wl &key timeout)
     (with-mapped-conditions ()
@@ -392,5 +602,88 @@
 
   (defun %remove-waiter (wl w)
     (declare (ignore wl w)))
+) ; progn
 
-  )
+#+(and ecl win32)
+(progn
+  (defun maybe-wsa-error (rv &optional syscall)
+    (unless (zerop rv)
+      (sb-bsd-sockets::socket-error syscall)))
+
+  (defun %setup-wait-list (wl)
+    (setf (wait-list-%wait wl)
+          (ffi:c-inline () () :int
+           "WSAEVENT event;
+            event = WSACreateEvent();
+            @(return) = event;")))
+
+  (defun %add-waiter (wait-list waiter)
+    (let ((events (etypecase waiter
+                    (stream-server-usocket (logior fd-connect fd-accept fd-close))
+                    (stream-usocket (logior fd-read))
+                    (datagram-usocket (logior fd-read)))))
+      (maybe-wsa-error
+       (ffi:c-inline ((socket-handle waiter) (wait-list-%wait wait-list) events)
+                     (:fixnum :fixnum :fixnum) :fixnum
+        "int result;
+         result = WSAEventSelect((SOCKET)#0, (WSAEVENT)#1, (long)#2);
+         @(return) = result;")
+       '%add-waiter)))
+
+  (defun %remove-waiter (wait-list waiter)
+    (maybe-wsa-error
+     (ffi:c-inline ((socket-handle waiter) (wait-list-%wait wait-list))
+                   (:fixnum :fixnum) :fixnum
+      "int result;
+       result = WSAEventSelect((SOCKET)#0, (WSAEVENT)#1, 0L);
+       @(return) = result;")
+     '%remove-waiter))
+
+  ;; TODO: how to handle error (result) in this call?
+  (defun bytes-available-for-read (socket)
+    (ffi:c-inline ((socket-handle socket)) (:fixnum) :fixnum
+     "u_long nbytes;
+      int result;
+      nbytes = 0L;
+      result = ioctlsocket((SOCKET)#0, FIONREAD, &nbytes);
+      @(return) = nbytes;"))
+
+  (defun update-ready-and-state-slots (sockets)
+    (dolist (socket sockets)
+      (if (or (and (stream-usocket-p socket)
+                   (listen (socket-stream socket)))
+              (%ready-p socket))
+          (setf (state socket) :READ)
+        (let ((events (etypecase socket
+                        (stream-server-usocket (logior fd-connect fd-accept fd-close))
+                        (stream-usocket (logior fd-read))
+                        (datagram-usocket (logior fd-read)))))
+          ;; TODO: check the iErrorCode array
+          (if (ffi:c-inline ((socket-handle socket) events) (:fixnum :fixnum) :bool
+               "WSANETWORKEVENTS network_events;
+                int i, result;
+                result = WSAEnumNetworkEvents((SOCKET)#0, 0, &network_events);
+                if (!result) {
+                  @(return) = (#1 & network_events.lNetworkEvents)? Ct : Cnil;
+                } else
+                  @(return) = Cnil;")
+              (setf (%ready-p socket) t
+                    (state socket) :READ)
+            (sb-bsd-sockets::socket-error 'update-ready-and-state-slots))))))
+
+  (defun wait-for-input-internal (wait-list &key timeout)
+    (when (waiting-required (wait-list-waiters wait-list))
+      (let ((rv (ffi:c-inline ((wait-list-%wait wait-list) (truncate (* 1000 timeout)))
+                              (:fixnum :fixnum) :fixnum
+                 "DWORD result;
+                  WSAEVENT events[1];
+                  events[0] = (WSAEVENT)#0;
+                  result = WSAWaitForMultipleEvents(1, events, NULL, #1, NULL);
+                  @(return) = result;")))
+        (ecase rv
+          ((#.+wsa-wait-event-0+ #.+wsa-wait-timeout+)
+           (update-ready-and-state-slots (wait-list-waiters wait-list)))
+          ((#.+wsa-wait-failed+)
+           (sb-bsd-sockets::socket-error 'wait-for-input-internal))))))
+
+) ; progn

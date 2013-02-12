@@ -1,6 +1,6 @@
                                                                 -*- text -*-
 
-$Id: backends.txt 182 2007-01-19 23:43:12Z ehuelsmann $
+$Id: backends.txt 508 2010-01-04 07:16:10Z ctian $
 
 A document to describe which APIs a backend should implement.
 
@@ -15,6 +15,7 @@ Functions:
  - get-hosts-by-name [ optional ]
  - get-host-by-address [ optional ]
 
+ - wait-for-input-internal (new in 0.4.x)
 
 Methods:
 

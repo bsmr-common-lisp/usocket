@@ -1,5 +1,5 @@
-;;;; $Id: cmucl.lisp 470 2008-10-28 12:02:01Z ctian $
-;;;; $URL: svn+ssh://ehuelsmann@common-lisp.net/project/usocket/svn/usocket/tags/0.4.1/backend/cmucl.lisp $
+;;;; $Id: cmucl.lisp 564 2010-09-28 09:15:13Z ctian $
+;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.0/backend/cmucl.lisp $
 
 ;;;; See LICENSE for licensing information.
 
@@ -50,7 +50,7 @@
                                                :socket socket
                                                :condition condition))))
 
-(defun socket-connect (host port &key (element-type 'character)
+(defun socket-connect (host port &key (protocol :stream) (element-type 'character)
                        timeout deadline (nodelay t nodelay-specified)
 		       (local-host nil local-host-p)
 		       (local-port nil local-port-p)
@@ -65,25 +65,53 @@
   (when (and local-port-p (not local-bind-p))
      (unsupported 'local-port 'socket-connect :minimum "Snapshot 2008-08 (19E)"))
 
-  (let* ((socket))
-    (setf socket
-	  (let ((args (list (host-to-hbo host) port :stream)))
-	    (when (and local-bind-p (or local-host-p local-port-p))
-	      (nconc args (list :local-host (when local-host
-					      (host-to-hbo local-host))
-				:local-port local-port)))
-	    (with-mapped-conditions (socket)
-	      (apply #'ext:connect-to-inet-socket args))))
-    (if socket
-        (let* ((stream (sys:make-fd-stream socket :input t :output t
-                                           :element-type element-type
-                                           :buffering :full))
-               ;;###FIXME the above line probably needs an :external-format
-               (usocket (make-stream-socket :socket socket
-                                            :stream stream)))
-          usocket)
-      (let ((err (unix:unix-errno)))
-        (when err (cmucl-map-socket-error err))))))
+  (let ((socket))
+    (ecase protocol
+      (:stream
+       (setf socket
+	     (let ((args (list (host-to-hbo host) port protocol)))
+	       (when (and local-bind-p (or local-host-p local-port-p))
+		 (nconc args (list :local-host (when local-host
+						 (host-to-hbo local-host))
+				   :local-port local-port)))
+	       (with-mapped-conditions (socket)
+		 (apply #'ext:connect-to-inet-socket args))))
+       (if socket
+	   (let* ((stream (sys:make-fd-stream socket :input t :output t
+					      :element-type element-type
+					      :buffering :full))
+		  ;;###FIXME the above line probably needs an :external-format
+		  (usocket (make-stream-socket :socket socket
+					       :stream stream)))
+	     usocket)
+	   (let ((err (unix:unix-errno)))
+	     (when err (cmucl-map-socket-error err)))))
+      (:datagram
+       (setf socket
+	     (if (and host port)
+		 (let ((args (list (host-to-hbo host) port protocol)))
+		   (when (and local-bind-p (or local-host-p local-port-p))
+		     (nconc args (list :local-host (when local-host
+						     (host-to-hbo local-host))
+				       :local-port local-port)))
+		   (with-mapped-conditions (socket)
+		     (apply #'ext:connect-to-inet-socket args)))
+		 (if (or local-host-p local-port-p)
+		     (with-mapped-conditions (socket)
+		       (apply #'ext:create-inet-listener
+			      (nconc (list (or local-port 0) protocol)
+				     (when (and local-host-p
+						(ip/= local-host *wildcard-host*))
+				       (list :host (host-to-hbo local-host))))))
+		     (with-mapped-conditions (socket)
+		       (ext:create-inet-socket protocol)))))
+       (if socket
+	   (let ((usocket (make-datagram-socket socket)))
+	     (ext:finalize usocket #'(lambda () (when (%open-p usocket)
+						  (ext:close-socket socket))))
+	     usocket)
+	   (let ((err (unix:unix-errno)))
+	     (when err (cmucl-map-socket-error err))))))))
 
 (defun socket-listen (host port
                            &key reuseaddress
@@ -128,6 +156,24 @@
   (with-mapped-conditions (usocket)
     (ext:close-socket (socket usocket))))
 
+(defmethod socket-close :after ((socket datagram-usocket))
+  (setf (%open-p socket) nil))
+
+(defmethod socket-send ((usocket datagram-usocket) buffer length &key host port)
+  (with-mapped-conditions (usocket)
+    (ext:inet-sendto (socket usocket) buffer length (if host (host-to-hbo host)) port)))
+
+(defmethod socket-receive ((usocket datagram-usocket) buffer length &key)
+  (let ((real-buffer (or buffer
+                         (make-array length :element-type '(unsigned-byte 8))))
+        (real-length (or length
+                         (length buffer))))
+    (multiple-value-bind (nbytes remote-host remote-port)
+        (with-mapped-conditions (usocket)
+          (ext:inet-recvfrom (socket usocket) real-buffer real-length))
+      (when (plusp nbytes)
+        (values real-buffer nbytes remote-host remote-port)))))
+
 (defmethod get-local-name ((usocket usocket))
   (multiple-value-bind
       (address port)
@@ -163,10 +209,10 @@
       ;; constants mentioned in C
       (let ((exception
              (second (assoc errno
-                            '((1 ns-host-not-found-error) ;; HOST_NOT_FOUND
-                              (2 ns-no-recovery-error)    ;; NO_DATA
-                              (3 ns-no-recovery-error)    ;; NO_RECOVERY
-                              (4 ns-try-again))))))       ;; TRY_AGAIN
+                            '((1 ns-host-not-found-error)     ;; HOST_NOT_FOUND
+                              (2 ns-no-recovery-error)        ;; NO_DATA
+                              (3 ns-no-recovery-error)        ;; NO_RECOVERY
+                              (4 ns-try-again-condition)))))) ;; TRY_AGAIN
         (when exception
           (error exception))))))
 
@@ -216,5 +262,5 @@
                  (when (unix:fd-isset (socket x) rfds)
                    (setf (state x) :READ)))
              (progn
-               ;;###FIXME generate an error, except for EINTR
+	       ;;###FIXME generate an error, except for EINTR
                )))))))

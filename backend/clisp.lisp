@@ -1,29 +1,31 @@
-;;;; $Id: clisp.lisp 448 2008-10-21 19:18:02Z ctian $
-;;;; $URL: svn+ssh://ehuelsmann@common-lisp.net/project/usocket/svn/usocket/tags/0.4.1/backend/clisp.lisp $
+;;;; $Id: clisp.lisp 573 2011-01-05 23:16:16Z ctian $
+;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.0/backend/clisp.lisp $
 
 ;;;; See LICENSE for licensing information.
 
 (in-package :usocket)
 
-
 ;; utility routine for looking up the current host name
+#+ffi
 (FFI:DEF-CALL-OUT get-host-name-internal
          (:name "gethostname")
          (:arguments (name (FFI:C-PTR (FFI:C-ARRAY-MAX ffi:character 256))
                            :OUT :ALLOCA)
                      (len ffi:int))
          #+win32 (:library "WS2_32")
+	 #-win32 (:library :default)
          (:language #-win32 :stdc
                     #+win32 :stdc-stdcall)
          (:return-type ffi:int))
 
-
 (defun get-host-name ()
+  #+ffi
   (multiple-value-bind (retcode name)
       (get-host-name-internal 256)
     (when (= retcode 0)
-      name)))
-
+      name))
+  #-ffi
+  "localhost")
 
 #+win32
 (defun remap-maybe-for-win32 (z)
@@ -55,7 +57,7 @@
                  (error usock-err :socket socket)
                (signal usock-err :socket socket)))))))
 
-(defun socket-connect (host port &key (element-type 'character)
+(defun socket-connect (host port &key (protocol :stream) (element-type 'character)
                        timeout deadline (nodelay t nodelay-specified)
                        local-host local-port)
   (declare (ignore nodelay))
@@ -175,3 +177,85 @@
         wait-list))))
 
 
+;;
+;; UDP/Datagram sockets!
+;;
+
+#+rawsock
+(progn
+
+  (defun make-sockaddr_in ()
+    (make-array 16 :element-type '(unsigned-byte 8) :initial-element 0))
+
+  (declaim (inline fill-sockaddr_in))
+  (defun fill-sockaddr_in (sockaddr_in ip port)
+    (port-to-octet-buffer sockaddr_in port)
+    (ip-to-octet-buffer sockaddr_in ip :start 2)
+    sockaddr_in)
+
+  (defun socket-create-datagram (local-port
+                                 &key (local-host *wildcard-host*)
+                                      remote-host
+                                      remote-port)
+    (let ((sock (rawsock:socket :inet :dgram 0))
+          (lsock_addr (fill-sockaddr_in (make-sockaddr_in)
+                                        local-host local-port))
+          (rsock_addr (when remote-host
+                        (fill-sockaddr_in (make-sockaddr_in)
+                                          remote-host (or remote-port
+                                                          local-port)))))
+      (bind sock lsock_addr)
+      (when rsock_addr
+        (connect sock rsock_addr))
+      (make-datagram-socket sock :connected-p (if rsock_addr t nil))))
+
+  (defun socket-receive (socket buffer &key (size (length buffer)))
+    "Returns the buffer, the number of octets copied into the buffer (received)
+and the address of the sender as values."
+    (let* ((sock (socket socket))
+           (sockaddr (when (not (connected-p socket))
+                       (rawsock:make-sockaddr)))
+           (rv (if sockaddr
+                   (rawsock:recvfrom sock buffer sockaddr
+                                     :start 0
+                                     :end size)
+                   (rawsock:recv sock buffer
+                                 :start 0
+                                 :end size))))
+      (values buffer
+              rv
+              (list (ip-from-octet-buffer (sockaddr-data sockaddr) 4)
+                    (port-from-octet-buffer (sockaddr-data sockaddr) 2)))))
+
+  (defun socket-send (socket buffer &key address (size (length buffer)))
+    "Returns the number of octets sent."
+    (let* ((sock (socket socket))
+           (sockaddr (when address
+                       (rawsock:make-sockaddr :INET
+                                              (fill-sockaddr_in
+                                               (make-sockaddr_in)
+                                               (host-byte-order
+                                                (second address))
+                                               (first address)))))
+           (rv (if address
+                   (rawsock:sendto sock buffer sockaddr
+                                   :start 0
+                                   :end size)
+                   (rawsock:send sock buffer
+                                 :start 0
+                                 :end size))))
+      rv))
+
+  (defmethod socket-close ((usocket datagram-usocket))
+    (when (wait-list usocket)
+       (remove-waiter (wait-list usocket) usocket))
+    (rawsock:sock-close (socket usocket)))
+  
+  )
+
+#-rawsock
+(progn
+  (warn "This image doesn't contain the RAWSOCK package.
+To enable UDP socket support, please be sure to use the -Kfull parameter
+at startup, or to enable RAWSOCK support during compilation.")
+  )

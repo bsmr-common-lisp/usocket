@@ -1,5 +1,5 @@
-;;;; $Id: condition.lisp 485 2008-12-26 14:31:49Z ctian $
-;;;; $URL: svn+ssh://ehuelsmann@common-lisp.net/project/usocket/svn/usocket/tags/0.4.1/condition.lisp $
+;;;; $Id: condition.lisp 564 2010-09-28 09:15:13Z ctian $
+;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.0/condition.lisp $
 
 ;;;; See LICENSE for licensing information.
 
@@ -111,13 +111,15 @@ condition available."))
    host-unreachable-error
    shutdown-error
    timeout-error
+   deadline-timeout-error
    invalid-socket-error
    invalid-socket-stream-error)
   (socket-error))
 
 (define-condition unknown-error (socket-error)
   ((real-error :initarg :real-error
-               :accessor usocket-real-error))
+               :accessor usocket-real-error
+               :initform nil))
   (:report (lambda (c stream)
              (typecase c
                (simple-condition
@@ -130,12 +132,13 @@ condition available."))
 error available."))
 
 (define-usocket-condition-classes
-  (ns-try-again)
+  (ns-try-again-condition)
   (ns-condition))
 
 (define-condition ns-unknown-condition (ns-condition)
-  ((real-error :initarg :real-condition
-               :accessor ns-real-condition))
+  ((real-condition :initarg :real-condition
+                   :accessor ns-real-condition
+                   :initform nil))
   (:documentation "Condition raised when there's no other - more applicable -
 condition available."))
 
@@ -150,7 +153,8 @@ condition available."))
 
 (define-condition ns-unknown-error (ns-error)
   ((real-error :initarg :real-error
-               :accessor ns-real-error))
+               :accessor ns-real-error
+               :initform nil))
   (:report (lambda (c stream)
              (typecase c
                (simple-condition
@@ -183,7 +187,7 @@ error available."))
     ((49 99) . address-not-available-error)
     ((9) . bad-file-descriptor-error)
     ((61 111) . connection-refused-error)
-    ((64 131) . connection-reset-error)
+    ((54 104) . connection-reset-error)
     ((53 103) . connection-aborted-error)
     ((22) . invalid-argument-error)
     ((55 105) . no-buffers-error)
@@ -200,21 +204,16 @@ error available."))
     ((64 112) . host-down-error)
     ((65 113) . host-unreachable-error)))
 
-
 (defun map-errno-condition (errno)
   (cdr (assoc errno +unix-errno-error-map+ :test #'member)))
 
-
 (defun map-errno-error (errno)
   (cdr (assoc errno +unix-errno-error-map+ :test #'member)))
-
 
 (defparameter +unix-ns-error-map+
   `((1 . ns-host-not-found-error)
     (2 . ns-try-again-condition)
     (3 . ns-no-recovery-error)))
-
-
 
 (defmacro unsupported (feature context &key minimum)
   `(cerror "Ignore it and continue" 'unsupported
@@ -224,3 +223,11 @@ error available."))
 
 (defmacro unimplemented (feature context)
   `(signal 'unimplemented :feature ,feature :context ,context))
+
+
+;;; People may want to ignore all unsupported warnings, here it is.
+(defmacro ignore-unsupported-warnings (&body body)
+  `(handler-bind ((unsupported
+                   #'(lambda (c)
+                       (declare (ignore c)) (continue))))
+     (progn ,@body)))
