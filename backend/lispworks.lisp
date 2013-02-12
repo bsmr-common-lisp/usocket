@@ -1,5 +1,5 @@
-;;;; $Id: lispworks.lisp 666 2011-06-30 16:38:18Z ctian $
-;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.3/backend/lispworks.lisp $
+;;;; $Id: lispworks.lisp 668 2011-08-13 05:58:27Z ctian $
+;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.4/backend/lispworks.lisp $
 
 ;;;; See LICENSE for licensing information.
 

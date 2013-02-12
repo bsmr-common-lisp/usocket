@@ -1,9 +1,7 @@
-;;;; $Id: package.lisp 646 2011-05-01 05:04:23Z ctian $
-;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.3/package.lisp $
+;;;; $Id: package.lisp 675 2011-10-01 14:49:26Z ctian $
+;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.4/package.lisp $
 
 ;;;; See the LICENSE file for licensing information.
-
-(in-package :usocket-system)
 
 (defpackage :usocket
   (:use :common-lisp #+abcl :java)
@@ -29,6 +27,7 @@
              #:socket-send    ; udp function (send)
              #:socket-receive ; udp function (receive)
              #:socket-server  ; udp server
+             #:socket-option  ; 0.6.x
 
              #:wait-for-input ; waiting for input-ready state (select() like)
              #:make-wait-list
@@ -86,20 +85,3 @@
              #:insufficient-implementation ; conditions regarding usocket support level
              #:unsupported
              #:unimplemented))
-
-(in-package :usocket)
-
-;;; Logical Pathname Translations, learn from CL-HTTP source code
-
-(eval-when (:load-toplevel :execute)
-  (let* ((defaults #+asdf (asdf:component-pathname (asdf:find-system :usocket))
-                   #-asdf *load-truename*)
-         (home (make-pathname :name :wild :type :wild
-                              :directory (append (pathname-directory defaults)
-                                                 '(:wild-inferiors))
-                              :host (pathname-host defaults)
-                              :defaults defaults
-			      :version :newest)))
-    (setf (logical-pathname-translations "usocket")
-          `(("**;*.*.NEWEST" ,home)
-            ("**;*.*" ,home)))))

@@ -1,5 +1,5 @@
-;;;; $Id: allegro.lisp 618 2011-03-31 03:22:37Z ctian $
-;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.3/backend/allegro.lisp $
+;;;; $Id: allegro.lisp 671 2011-08-16 07:58:22Z hhubner $
+;;;; $URL: svn://common-lisp.net/project/usocket/svn/usocket/tags/0.5.4/backend/allegro.lisp $
 
 ;;;; See LICENSE for licensing information.
 
@@ -199,5 +199,5 @@
       ;; [Same code is also used in openmcl.lisp]
       (dolist (x active-internal-sockets)
         (setf (state (gethash x (wait-list-map wait-list)))
-              :READ))
+              :read))
       wait-list)))
